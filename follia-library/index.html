@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+
+    <link rel="icon" type="image/png" href="/src/assets/logo/image.png" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <meta name="theme-color" content="#6b4f3a" />
+
+    <meta
+      name="description"
+      content="Follia Library — discover, save, and share books, stories, comics, and digital resources."
+    />
+
+    <title>Follia Library</title>
+
+    <script>
+      try {
+        const savedTheme = localStorage.getItem('follia-theme') || 'light'
+        const systemPrefersDark =
+          window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
+
+        const activeTheme = savedTheme === 'dark' || (savedTheme !== 'light' && systemPrefersDark)
+
+        document.documentElement.setAttribute('data-theme', activeTheme ? 'dark' : 'light')
+      } catch {
+        document.documentElement.setAttribute('data-theme', 'light')
+      }
+    </script>
+  </head>
+
+  <body>
+    <div id="app"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
