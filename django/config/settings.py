@@ -212,8 +212,8 @@ FRONTEND_URL = os.getenv(
 
 LOGIN_REDIRECT_URL = FRONTEND_URL
 
-# Require users to verify their email before they can log in.
-ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+# Email verification remains available, but does not block authentication.
+ACCOUNT_EMAIL_VERIFICATION = "optional"
 
 ACCOUNT_LOGIN_METHODS = {"email"}
 

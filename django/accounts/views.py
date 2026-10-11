@@ -81,7 +81,8 @@ def register(request):
             address.save(update_fields=["primary"])
     except IntegrityError:
         return Response({"detail": "Unable to create an account with those details."}, status=400)
-    return Response({"detail": "Check your inbox to verify your email.", "email": email}, status=201)
+    login(request, user)
+    return Response({"user": user_data(user, request)}, status=201)
 
 
 @api_view(["POST"])
@@ -93,8 +94,6 @@ def login_view(request):
     user = authenticate(request, username=user_obj.username, password=password) if user_obj else None
     if not user:
         return Response({"detail": "Email or password is incorrect."}, status=400)
-    if not EmailAddress.objects.filter(user=user, email__iexact=email, verified=True).exists():
-        return Response({"detail": "Please verify your email address before signing in."}, status=403)
     login(request, user)
     return Response({"user": user_data(user, request)})
 
