@@ -1,0 +1,67 @@
+from django.conf import settings
+from django.db import models
+
+class Profile(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
+    username = models.SlugField(max_length=30, unique=True)
+    display_name = models.CharField(max_length=80, blank=True)
+    avatar = models.FileField(upload_to="avatars/",blank=True,)
+    bio = models.CharField(max_length=280, blank=True)
+    location = models.CharField(max_length=100, blank=True)
+    website = models.URLField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def avatar_url(self):
+        return self.avatar.url if self.avatar else ""
+
+    def __str__(self):
+        return f"@{self.username}"
+
+
+class Follow(models.Model):
+    follower = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="following_edges")
+    following = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="follower_edges")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["follower", "following"], name="unique_user_follow"),
+            models.CheckConstraint(condition=~models.Q(follower=models.F("following")), name="no_self_follow"),
+        ]
+        ordering = ["-created_at"]
+
+
+class Notification(models.Model):
+    TYPE_CHOICES = [
+        ("follow", "Follow"),
+        ("like", "Like"),
+        ("comment", "Comment"),
+        ("book_club_join", "Book Club activity"),
+        ("book_club_reply", "Book Club reply"),
+        ("book_club_admin", "Book Club role"),
+    ]
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sent_notifications")
+    type = models.CharField(max_length=32, choices=TYPE_CHOICES)
+    post_id = models.PositiveBigIntegerField(null=True, blank=True)
+    resource_id = models.PositiveBigIntegerField(null=True, blank=True)
+    book_club_id = models.PositiveBigIntegerField(null=True, blank=True)
+    read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+def notify(recipient, actor, kind, *, post_id=None, resource_id=None, book_club_id=None):
+    if not recipient or not actor or recipient.pk == actor.pk:
+        return None
+    return Notification.objects.create(
+        recipient=recipient,
+        actor=actor,
+        type=kind,
+        post_id=post_id,
+        resource_id=resource_id,
+        book_club_id=book_club_id,
+    )
