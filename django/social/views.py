@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from accounts.models import Follow, notify
 from accounts.models import Profile
 from accounts.serializers import ProfileSerializer
+from config.storage_backends import media_storage_available_for_upload
 from library.models import Resource
 from library.serializers import ResourceSerializer
 from clubs.models import BookClub
@@ -63,9 +64,11 @@ def posts(request):
         return Response({"detail": "Posts can be up to 5,000 characters."}, status=400)
     if media and (not (media.content_type or "").startswith(("image/", "video/")) or media.size > 50 * 1024 * 1024):
         return Response({"detail": "Post media must be an image or video smaller than 50 MB."}, status=400)
+    if media and not media_storage_available_for_upload():
+        return Response({"detail": "Cloudflare R2 media storage is not configured."}, status=503)
     media_type = request.data.get("media_type", "")
     if media and media_type not in {"image", "video"}:
-        media_type = "video" if media.content_type.startswith("video/") else "image"
+        media_type = "video" if (media.content_type or "").startswith("video/") else "image"
     post = Post.objects.create(author=request.user, body=body, media=media or "", media_type=media_type)
     return Response(PostSerializer(post, context={"request": request}).data, status=201)
 
@@ -97,6 +100,8 @@ def post_detail(request, post_id):
     media = request.FILES.get("media")
     if media and (not (media.content_type or "").startswith(("image/", "video/")) or media.size > 50 * 1024 * 1024):
         return Response({"detail": "Post media must be an image or video smaller than 50 MB."}, status=400)
+    if media and not media_storage_available_for_upload():
+        return Response({"detail": "Cloudflare R2 media storage is not configured."}, status=503)
     serializer = PostSerializer(post, data=request.data, partial=True, context={"request": request})
     serializer.is_valid(raise_exception=True)
     serializer.save()
@@ -110,9 +115,9 @@ def post_like(request, post_id):
     if not post:
         return Response({"detail": "Post not found."}, status=404)
     if request.method == "POST":
-        _, created = PostLike.objects.get_or_create(user=request.user, post=post)
+        like, created = PostLike.objects.get_or_create(user=request.user, post=post)
         if created:
-            notify(post.author, request.user, "like", post_id=post.pk)
+            notify(post.author, request.user, "like", post_id=post.pk, event_key=f"post-like:{like.pk}")
         liked = True
     else:
         PostLike.objects.filter(user=request.user, post=post).delete()
@@ -140,13 +145,41 @@ def post_comments(request, post_id):
     if not post:
         return Response({"detail": "Post not found."}, status=404)
     if request.method == "GET":
-        return Response(PostCommentSerializer(post.comments.select_related("user__profile")[:100], many=True, context={"request": request}).data)
+        comments = post.comments.filter(parent__isnull=True).select_related("user__profile").prefetch_related("replies__user__profile")[:100]
+        return Response(PostCommentSerializer(comments, many=True, context={"request": request}).data)
     if not request.user.is_authenticated:
         return Response({"detail": "Sign in to comment."}, status=401)
     serializer = PostCommentSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    comment = serializer.save(user=request.user, post=post)
-    notify(post.author, request.user, "comment", post_id=post.pk)
+    parent_id = request.data.get("parent_id")
+    parent = None
+    if parent_id not in (None, ""):
+        try:
+            parent_id = int(parent_id)
+        except (TypeError, ValueError):
+            return Response({"detail": "Invalid comment to reply to."}, status=400)
+        parent = PostComment.objects.filter(
+            pk=parent_id, post=post, parent__isnull=True
+        ).select_related("user").first()
+        if not parent:
+            return Response({"detail": "Comment to reply to was not found for this post."}, status=400)
+    comment = serializer.save(user=request.user, post=post, parent=parent)
+    if parent:
+        notify(
+            parent.user,
+            request.user,
+            "comment_reply",
+            post_id=post.pk,
+            event_key=f"post-comment-reply:{comment.pk}",
+        )
+    else:
+        notify(
+            post.author,
+            request.user,
+            "comment",
+            post_id=post.pk,
+            event_key=f"post-comment:{comment.pk}",
+        )
     return Response(PostCommentSerializer(comment, context={"request": request}).data, status=201)
 
 

@@ -57,7 +57,7 @@
           v-else
           class="resource-author-avatar resource-author-initial"
         >
-          {{ getInitial(resource.profiles?.username || resource.author) }}
+          <UserRound :size="15" />
         </span>
 
         <span class="resource-author-name">
@@ -83,7 +83,7 @@
           v-else
           class="resource-author-avatar resource-author-initial"
         >
-          {{ getInitial(resource.author) }}
+          <UserRound :size="15" />
         </span>
 
         <span class="resource-author-name">
@@ -142,108 +142,48 @@
           </div>
 
           <div class="comments-list">
-            <div
-              v-for="comment in comments"
-              :key="comment.id"
-              class="comment-item"
-            >
-              <!-- Comment avatar -->
-              <RouterLink
-                v-if="comment.profiles?.id"
-                :to="{
-                  name: 'publisher-detail',
-                  params: { id: comment.profiles.id },
-                }"
-                class="comment-avatar"
-                @click.stop
-              >
-                <img
-                  v-if="getCommentAvatarUrl(comment) && !failedCommentAvatars.has(comment.id)"
-                  :src="getCommentAvatarUrl(comment)"
-                  :alt="comment.profiles.display_name || comment.profiles.username || 'User'"
-                  class="comment-avatar-image"
-                  @error="markCommentAvatarFailed(comment.id)"
-                />
-
-                <span v-else>
-                  {{
-                    getInitial(
-                      comment.profiles.display_name ||
-                      comment.profiles.username
-                    )
-                  }}
-                </span>
-              </RouterLink>
-
-              <div v-else class="comment-avatar">
-                {{ getInitial(comment.author) }}
-              </div>
-
-              <div class="comment-body">
-                <div class="comment-meta">
-                  <RouterLink
-                    v-if="comment.profiles?.id"
-                    :to="{
-                      name: 'publisher-detail',
-                      params: { id: comment.profiles.id },
-                    }"
-                    @click.stop
-                  >
-                    {{
-                      comment.profiles.display_name ||
-                      comment.profiles.username ||
-                      'Unknown user'
-                    }}
+            <div v-if="commentsLoading" class="comments-state"><LoaderCircle :size="20" class="spin" /> Loading comments...</div>
+            <div v-else-if="commentsError" class="comments-state comments-error" role="alert">
+              {{ commentsError }} <button type="button" @click="loadComments">Try again</button>
+            </div>
+            <template v-else-if="comments.length">
+              <article v-for="comment in comments" :key="comment.id" class="comment-thread">
+                <div class="comment-item">
+                  <RouterLink v-if="comment.profiles?.id" :to="{ name: 'publisher-detail', params: { id: comment.profiles.id } }" class="comment-avatar" @click.stop>
+                    <img v-if="getCommentAvatarUrl(comment) && !failedCommentAvatars.has(comment.id)" :src="getCommentAvatarUrl(comment)" :alt="comment.profiles.display_name || comment.profiles.username || 'User'" class="comment-avatar-image" @error="markCommentAvatarFailed(comment.id)" />
+                    <UserRound v-else :size="16" />
                   </RouterLink>
-
-                  <span v-else>
-                    {{ comment.author || 'Unknown user' }}
-                  </span>
-
-                  <span>{{ formatCommentTime(comment.created_at) }}</span>
+                  <div v-else class="comment-avatar"><UserRound :size="16" /></div>
+                  <div class="comment-body">
+                    <div class="comment-meta">
+                      <RouterLink v-if="comment.profiles?.id" :to="{ name: 'publisher-detail', params: { id: comment.profiles.id } }" @click.stop>{{ comment.profiles.display_name || comment.profiles.username || 'Follia reader' }}</RouterLink>
+                      <span v-else>{{ comment.author || 'Follia reader' }}</span>
+                      <span>{{ formatCommentTime(comment.created_at) }}</span>
+                    </div>
+                    <p>{{ comment.content }}</p>
+                    <button class="reply-comment" type="button" @click="replyTo(comment)">Reply</button>
+                  </div>
                 </div>
-
-                <p>{{ comment.content || comment.text }}</p>
-              </div>
-            </div>
-
-            <div
-              v-if="comments.length === 0 && !commentsLoading"
-              class="comments-empty"
-            >
-              <MessageCircle :size="24" />
-              <p>No comments yet.</p>
-              <span>Be the first to share your thoughts.</span>
-            </div>
-
-            <div v-if="commentsLoading" class="comments-loading">
-              <LoaderCircle :size="22" class="spin" />
-              <span>Loading comments...</span>
-            </div>
+                <div v-for="reply in comment.replies || []" :key="reply.id" class="comment-item comment-reply">
+                  <div class="comment-avatar"><UserAvatar :src="reply.profiles?.avatar_url || reply.profiles?.avatar" :alt="reply.profiles?.display_name || reply.profiles?.username || 'Profile picture'" :icon-size="15" /></div>
+                  <div class="comment-body">
+                    <div class="comment-meta"><span>{{ reply.profiles?.display_name || reply.profiles?.username || 'Follia reader' }}</span><span>{{ formatCommentTime(reply.created_at) }}</span></div>
+                    <p>{{ reply.content }}</p>
+                  </div>
+                </div>
+              </article>
+            </template>
+            <div v-else class="comments-empty"><MessageCircle :size="24" /><p>No comments yet.</p><span>Be the first to share your thoughts.</span></div>
           </div>
 
-          <div class="comment-input">
-            <input
-              v-model="newComment"
-              type="text"
-              maxlength="2000"
-              placeholder="Write a comment..."
-              :disabled="commentSubmitting"
-              @keyup.enter="addComment"
-            />
-
-            <button
-              :disabled="!newComment.trim() || commentSubmitting"
-              @click="addComment"
-            >
-              <LoaderCircle
-                v-if="commentSubmitting"
-                :size="15"
-                class="spin"
-              />
-              <span v-else>Send</span>
-            </button>
-          </div>
+          <form class="comment-input" @submit.prevent="addComment">
+            <div v-if="replyingTo" class="replying-to"><span>Replying to {{ replyingTo.profiles?.display_name || replyingTo.profiles?.username || 'comment' }}</span><button type="button" aria-label="Cancel reply" @click="replyingTo = null"><X :size="14" /></button></div>
+            <div class="comment-input-row">
+              <input v-model="newComment" type="text" maxlength="2000" :placeholder="replyingTo ? 'Write a reply...' : 'Write a comment...'" :disabled="commentSubmitting" />
+              <button type="submit" :disabled="!newComment.trim() || commentSubmitting"><LoaderCircle v-if="commentSubmitting" :size="15" class="spin" /><span v-else>Send</span></button>
+            </div>
+            <p v-if="commentSubmitError" class="comment-submit-error" role="alert">{{ commentSubmitError }}</p>
+          </form>
         </div>
       </div>
     </Teleport>
@@ -251,6 +191,8 @@
 </template>
 
 <script setup>
+import { resolveMediaUrl } from '../utils/media'
+
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -259,6 +201,7 @@ import {
   Heart,
   LoaderCircle,
   MessageCircle,
+  UserRound,
   X,
 } from 'lucide-vue-next'
 
@@ -282,45 +225,6 @@ const props = defineProps({
 })
 
 const router = useRouter()
-
-// Read the Django backend address from the Vue environment.
-const configuredApiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL
-
-const API_BASE_URL = (
-  configuredApiUrl ||
-  (import.meta.env.DEV
-    ? 'http://127.0.0.1:8000'
-    : window.location.origin)
-)
-  .replace(/\/+$/, '')
-  .replace(/\/api$/i, '')
-
-// Resolve relative Django media paths into complete image URLs.
-function resolveMediaUrl(url) {
-  if (!url || typeof url !== 'string') return null
-
-  const value = url.trim()
-  if (!value) return null
-
-  // Preserve complete URLs and temporary local previews.
-  if (
-    /^https?:\/\//i.test(value) ||
-    value.startsWith('blob:') ||
-    value.startsWith('data:')
-  ) {
-    return value
-  }
-
-  if (value.startsWith('//')) {
-    return `${window.location.protocol}${value}`
-  }
-
-  try {
-    return new URL(value, `${API_BASE_URL}/`).href
-  } catch {
-    return null
-  }
-}
 
 const resourceCoverUrl = computed(() =>
   resolveMediaUrl(props.resource.cover_url || props.resource.cover)
@@ -366,9 +270,12 @@ const comments = ref([])
 const commentCount = ref(0)
 const commentsLoading = ref(false)
 const commentSubmitting = ref(false)
+const commentsError = ref('')
+const commentSubmitError = ref('')
 
 const showComments = ref(false)
 const newComment = ref('')
+const replyingTo = ref(null)
 
 onMounted(() => {
   loadLikeData()
@@ -443,15 +350,26 @@ async function loadComments() {
   if (!props.resource?.id) return
 
   commentsLoading.value = true
+  commentsError.value = ''
 
   try {
     comments.value = await getResourceComments(props.resource.id)
-    commentCount.value = comments.value.length
+    commentCount.value = comments.value.reduce(
+      (count, comment) => count + 1 + (comment.replies?.length || 0),
+      0,
+    )
   } catch (error) {
     console.error('Comments error:', error)
+    commentsError.value = error?.message || 'Unable to load comments.'
   } finally {
     commentsLoading.value = false
   }
+}
+
+function replyTo(comment) {
+  replyingTo.value = comment
+  newComment.value = ''
+  commentSubmitError.value = ''
 }
 
 async function addComment() {
@@ -460,19 +378,27 @@ async function addComment() {
   if (!content || commentSubmitting.value) return
 
   commentSubmitting.value = true
+  commentSubmitError.value = ''
 
   try {
     const comment = await addResourceComment(
       props.resource.id,
-      content
+      content,
+      replyingTo.value?.id,
     )
 
-    comments.value.unshift(comment)
-    commentCount.value = comments.value.length
+    if (replyingTo.value) {
+      const parent = comments.value.find((item) => item.id === replyingTo.value.id)
+      if (parent) parent.replies = [...(parent.replies || []), comment]
+    } else {
+      comments.value.unshift({ ...comment, replies: comment.replies || [] })
+    }
+    commentCount.value += 1
     newComment.value = ''
+    replyingTo.value = null
   } catch (error) {
     console.error('Add comment error:', error)
-    window.alert(error?.message || 'Unable to add your comment.')
+    commentSubmitError.value = error?.message || 'Unable to add your comment.'
   } finally {
     commentSubmitting.value = false
   }
@@ -480,6 +406,8 @@ async function addComment() {
 
 function closeComments() {
   showComments.value = false
+  replyingTo.value = null
+  newComment.value = ''
 }
 
 function openResource() {
@@ -489,11 +417,6 @@ function openResource() {
       id: props.resource.id,
     },
   })
-}
-
-function getInitial(name) {
-  if (!name) return '?'
-  return name.trim().charAt(0).toUpperCase()
 }
 
 function formatCommentTime(dateString) {
@@ -557,4 +480,17 @@ function formatCommentTime(dateString) {
   flex: 0 0 36px;
   display: block;
 }
+
+.comment-input { display:block; }
+.comment-thread { display:block; }
+.comment-reply { margin-left:42px; }
+.reply-comment { margin-top:7px; padding:0; background:transparent; color:var(--text-tertiary); font-size:10px; font-weight:700; }
+.replying-to { display:flex; align-items:center; justify-content:space-between; margin:0 0 8px; color:var(--text-tertiary); font-size:10px; }
+.replying-to button { width:26px; height:26px; display:grid; place-items:center; border-radius:7px; background:var(--icon-bg); color:var(--text-secondary); }
+.comment-input-row { display:flex; gap:8px; }
+.comment-input-row input { flex:1; min-width:0; }
+.comment-submit-error { margin:8px 0 0; color:#a33b30; font-size:11px; }
+.comments-state { display:flex; align-items:center; justify-content:center; gap:8px; min-height:140px; color:var(--text-tertiary); font-size:12px; text-align:center; }
+.comments-error { flex-direction:column; }
+.comments-error button { color:var(--text-main); font-size:11px; font-weight:700; }
 </style>

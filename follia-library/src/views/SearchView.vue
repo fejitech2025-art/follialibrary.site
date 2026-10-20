@@ -103,17 +103,7 @@
               class="publisher-card"
             >
               <div class="publisher-avatar">
-                <img
-                  v-if="publisher.avatar_url || publisher.avatar"
-                  :src="resolveMediaUrl(publisher.avatar_url || publisher.avatar)"
-                  :alt="publisher.display_name || publisher.username || 'Publisher'"
-                />
-
-                <span v-else>
-                  {{
-                    (publisher.display_name || publisher.username || 'P').charAt(0).toUpperCase()
-                  }}
-                </span>
+                <UserAvatar :src="publisher.avatar_url || publisher.avatar" :alt="publisher.display_name || publisher.username || 'Profile picture'" :icon-size="19" />
               </div>
 
               <div class="publisher-info">
@@ -179,7 +169,7 @@ import { AlertCircle, ArrowUpRight, Search, X } from 'lucide-vue-next'
 import MainLayout from '../layouts/MainLayout.vue'
 import ResourceCard from '../components/ResourceCard.vue'
 import { searchLibrary } from '../services/searchService'
-import { resolveMediaUrl } from '../utils/media'
+import UserAvatar from '../components/UserAvatar.vue'
 
 const route = useRoute()
 const router = useRouter()

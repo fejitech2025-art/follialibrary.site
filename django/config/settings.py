@@ -108,7 +108,9 @@ if DB_ENGINE == "django.db.backends.sqlite3":
     DATABASES = {
         "default": {
             "ENGINE": DB_ENGINE,
-            "NAME": BASE_DIR / "db.sqlite3",
+            # DB_NAME is useful for isolated checks and tests.  When unset,
+            # keep the existing local SQLite database path.
+            "NAME": os.getenv("DB_NAME") or BASE_DIR / "db.sqlite3",
         }
     }
 
@@ -183,9 +185,46 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# R2 credentials stay on the backend.  A custom domain is optional: without
+# one, django-storages returns short-lived signed URLs for private bucket
+# objects.
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "").strip()
+# Preserve compatibility with the existing configuration, which supplies
+# CLOUDFLARE_ACCOUNT_ID. Explicit R2_ENDPOINT_URL remains an optional override.
+CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
+R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL", "").strip().rstrip("/")
+if not R2_ENDPOINT_URL and CLOUDFLARE_ACCOUNT_ID:
+    R2_ENDPOINT_URL = f"https://{CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID", "").strip()
+R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
+R2_REGION = os.getenv("R2_REGION", "auto").strip() or "auto"
+R2_PUBLIC_DOMAIN = os.getenv("R2_PUBLIC_DOMAIN", "").strip().rstrip("/")
+if R2_PUBLIC_DOMAIN.startswith(("https://", "http://")):
+    R2_PUBLIC_DOMAIN = R2_PUBLIC_DOMAIN.split("://", 1)[1].split("/", 1)[0]
+else:
+    R2_PUBLIC_DOMAIN = R2_PUBLIC_DOMAIN.split("/", 1)[0]
+
+R2_STORAGE_CONFIGURED = all(
+    (
+        R2_BUCKET_NAME,
+        R2_ENDPOINT_URL,
+        R2_ACCESS_KEY_ID,
+        R2_SECRET_ACCESS_KEY,
+    )
+)
+
+if R2_STORAGE_CONFIGURED:
+    DEFAULT_MEDIA_STORAGE = "config.storage_backends.R2MediaStorage"
+elif DEBUG:
+    # Keep local development usable without R2 credentials.
+    DEFAULT_MEDIA_STORAGE = "django.core.files.storage.FileSystemStorage"
+else:
+    # Production must not silently put new uploads on ephemeral local disk.
+    DEFAULT_MEDIA_STORAGE = "config.storage_backends.R2MediaStorage"
+
 STORAGES = {
     "default": {
-        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "BACKEND": DEFAULT_MEDIA_STORAGE,
     },
     "staticfiles": {
         "BACKEND": (
@@ -207,13 +246,13 @@ LOGIN_URL = "/accounts/login/"
 
 FRONTEND_URL = os.getenv(
     "FRONTEND_URL",
-    "http://localhost:5174",
-).rstrip("/")
+) or "http://localhost:5173"
+FRONTEND_URL = FRONTEND_URL.rstrip("/")
 
-LOGIN_REDIRECT_URL = FRONTEND_URL
+LOGIN_REDIRECT_URL = FRONTEND_URL + "/"
 
 # Email verification remains available, but does not block authentication.
-ACCOUNT_EMAIL_VERIFICATION = "optional"
+ACCOUNT_EMAIL_VERIFICATION = "none"
 
 ACCOUNT_LOGIN_METHODS = {"email"}
 
@@ -235,6 +274,10 @@ ACCOUNT_EMAIL_CONFIRMATION_AUTHENTICATED_REDIRECT_URL = (
 
 ACCOUNT_ADAPTER = "accounts.adapters.FolliaAccountAdapter"
 SOCIALACCOUNT_ADAPTER = "accounts.adapters.FolliaSocialAccountAdapter"
+SOCIALACCOUNT_ONLY = True
+SOCIALACCOUNT_AUTO_SIGNUP = True
+SOCIALACCOUNT_LOGIN_ON_GET = False
+SOCIALACCOUNT_EMAIL_VERIFICATION = "none"
 
 
 # --------------------------------------------------
@@ -251,11 +294,21 @@ SOCIALACCOUNT_PROVIDERS = {
             }
         ],
         "SCOPE": ["profile", "email"],
+        # Google's verified email can safely reconnect an existing local
+        # account that predates Google sign-in. Persist the connection so
+        # later sign-ins go straight through the normal OAuth callback.
+        "EMAIL_AUTHENTICATION": True,
+        "EMAIL_AUTHENTICATION_AUTO_CONNECT": True,
         "AUTH_PARAMS": {
             "access_type": "online",
+            "prompt": "select_account",
         },
     }
 }
+
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "").strip()
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "").strip()
+VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "").strip()
 
 
 # --------------------------------------------------
@@ -293,31 +346,31 @@ DEFAULT_FROM_EMAIL = os.getenv(
 
 CORS_ALLOWED_ORIGINS = [
     origin.strip().rstrip("/")
-    for origin in os.getenv(
-        "CORS_ALLOWED_ORIGINS",
+    for origin in (
+        os.getenv("CORS_ALLOWED_ORIGINS")
+        or
         (
             "http://localhost:5173,"
             "http://127.0.0.1:5173,"
             "http://localhost:5174,"
             "http://127.0.0.1:5174"
-        ),
+        )
     ).split(",")
     if origin.strip()
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     origin.strip().rstrip("/")
-    for origin in os.getenv(
-        "CSRF_TRUSTED_ORIGINS",
-        ",".join(CORS_ALLOWED_ORIGINS),
-    ).split(",")
+    for origin in (os.getenv("CSRF_TRUSTED_ORIGINS") or ",".join(CORS_ALLOWED_ORIGINS)).split(",")
     if origin.strip()
 ]
 
 CORS_ALLOW_CREDENTIALS = True
 
-SESSION_COOKIE_SAMESITE = "Lax"
-CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE") or ("None" if not DEBUG else "Lax")
+CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE") or SESSION_COOKIE_SAMESITE
+SESSION_COOKIE_SECURE = not DEBUG or SESSION_COOKIE_SAMESITE == "None"
+CSRF_COOKIE_SECURE = not DEBUG or CSRF_COOKIE_SAMESITE == "None"
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = False
 

@@ -9,15 +9,11 @@ import NotificationsView from '../views/NotificationsView.vue'
 import UploadResourceView from '../views/UploadResourceView.vue'
 import EditProfileView from '../views/EditProfileView.vue'
 import LoginView from '../views/LoginView.vue'
-import RegisterView from '../views/RegisterView.vue'
 import ResourceDetailView from '../views/ResourceDetailView.vue'
 import PublisherDetailView from '../views/PublisherDetailView.vue'
 import BookClubView from '../views/BookClubView.vue'
 import BookClubsView from '../views/BookClubsView.vue'
 import CreateView from '../views/CreateView.vue'
-import ForgotPasswordView from '../views/ForgotPasswordView.vue'
-import VerifyEmailView from '../views/VerifyEmailView.vue'
-import ResetPasswordView from '../views/ResetPasswordView.vue'
 import PostDetailView from '../views/PostDetailView.vue'
 import AboutView from '../views/AboutView.vue'
 
@@ -127,36 +123,6 @@ const router = createRouter({
       meta: {
         guestOnly: true,
       },
-    },
-
-    {
-      path: '/register',
-      name: 'register',
-      component: RegisterView,
-      meta: {
-        guestOnly: true,
-      },
-    },
-
-    {
-      path: '/forgot-password',
-      name: 'forgot-password',
-      component: ForgotPasswordView,
-      meta: { guestOnly: true },
-    },
-
-    {
-      path: '/verify-email',
-      name: 'verify-email',
-      component: VerifyEmailView,
-      meta: { guestOnly: true },
-    },
-
-    {
-      path: '/reset-password/:uid/:token',
-      name: 'reset-password',
-      component: ResetPasswordView,
-      meta: { guestOnly: true },
     },
 
     {

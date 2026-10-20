@@ -26,17 +26,7 @@
         <!-- Avatar -->
         <div class="profile-photo-section">
           <div class="profile-photo-wrapper">
-            <img
-              v-if="avatarPreview && !avatarImageFailed"
-              :src="avatarPreview"
-              alt="Profile preview"
-              class="profile-photo"
-              @error="handleAvatarError"
-            />
-
-            <div v-else class="profile-photo profile-photo-placeholder">
-              {{ form.displayName.charAt(0).toUpperCase() || 'U' }}
-            </div>
+            <div class="profile-photo"><UserAvatar :src="avatarPreview" alt="Profile preview" :icon-size="30" /></div>
 
             <button
               class="photo-camera-button"
@@ -307,6 +297,8 @@
 </template>
 
 <script setup>
+import { resolveMediaUrl } from '../utils/media'
+
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -329,6 +321,7 @@ import {
 
 import { useTheme } from '../composables/useTheme'
 import { useAuth } from '../composables/useAuth'
+import UserAvatar from '../components/UserAvatar.vue'
 
 import {
   getCurrentUser,
@@ -342,66 +335,10 @@ const router = useRouter()
 const { theme, setTheme } = useTheme()
 const { signOut } = useAuth()
 
-/*
-|--------------------------------------------------------------------------
-| Backend media URL handling
-|--------------------------------------------------------------------------
-|
-| Development:
-| VITE_API_URL=http://127.0.0.1:8000/api
-|
-| Production:
-| Set VITE_API_URL to your deployed backend API URL.
-|
-| Django media paths must resolve against the backend origin.
-*/
-
-const configuredApiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL
-
-const API_BASE_URL = (
-  configuredApiUrl ||
-  (import.meta.env.DEV
-    ? 'http://127.0.0.1:8000'
-    : window.location.origin)
-)
-  .replace(/\/+$/, '')
-  .replace(/\/api$/i, '')
-
-function resolveMediaUrl(url) {
-  if (!url || typeof url !== 'string') {
-    return null
-  }
-
-  const value = url.trim()
-
-  if (!value) {
-    return null
-  }
-
-  // Keep absolute URLs and temporary local image previews unchanged.
-  if (/^(https?:\/\/|blob:|data:)/i.test(value)) {
-    return value
-  }
-
-  // Support protocol-relative URLs.
-  if (value.startsWith('//')) {
-    return `${window.location.protocol}${value}`
-  }
-
-  try {
-    // Supports paths such as /media/avatars/profile.jpg.
-    return new URL(value, `${API_BASE_URL}/`).href
-  } catch (error) {
-    console.error('Unable to resolve profile image URL:', error)
-    return null
-  }
-}
-
 const imageInput = ref(null)
 
 const avatarPreview = ref(null)
 const avatarFile = ref(null)
-const avatarImageFailed = ref(false)
 
 const saving = ref(false)
 const saved = ref(false)
@@ -442,16 +379,6 @@ const themeOptions = [
 
 /*
 |--------------------------------------------------------------------------
-| Avatar image fallback
-|--------------------------------------------------------------------------
-*/
-
-function handleAvatarError() {
-  avatarImageFailed.value = true
-}
-
-/*
-|--------------------------------------------------------------------------
 | Load profile
 |--------------------------------------------------------------------------
 */
@@ -476,8 +403,6 @@ async function loadProfile() {
     avatarPreview.value = resolveMediaUrl(
       profile?.avatar_url || profile?.avatar || null,
     )
-
-    avatarImageFailed.value = false
 
     // Email is managed by the Django account system.
     email.value = user?.email || ''
@@ -529,7 +454,6 @@ function handleImageUpload(event) {
 
   avatarFile.value = file
   avatarPreview.value = URL.createObjectURL(file)
-  avatarImageFailed.value = false
 }
 
 function removeImage() {
@@ -539,7 +463,6 @@ function removeImage() {
 
   avatarPreview.value = null
   avatarFile.value = null
-  avatarImageFailed.value = false
 
   if (imageInput.value) {
     imageInput.value.value = ''
@@ -603,7 +526,6 @@ async function saveProfile() {
 
     avatarFile.value = null
     avatarPreview.value = resolveMediaUrl(avatarUrl || null)
-    avatarImageFailed.value = false
 
     if (imageInput.value) {
       imageInput.value.value = ''

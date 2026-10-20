@@ -94,15 +94,7 @@
               class="detail-author"
             >
               <div class="author-avatar">
-                <img
-                  v-if="resource.profiles.avatar_url || resource.profiles.avatar"
-                  :src="resolveMediaUrl(resource.profiles.avatar_url || resource.profiles.avatar)"
-                  alt=""
-                />
-
-                <span v-else>
-                  {{ getInitial(resource.profiles.display_name || resource.profiles.username) }}
-                </span>
+                <UserAvatar :src="resource.profiles.avatar_url || resource.profiles.avatar" :alt="resource.profiles.display_name || resource.profiles.username || 'Profile picture'" :icon-size="19" />
               </div>
 
               <div>
@@ -119,9 +111,7 @@
             <!-- Author without profile -->
             <div v-else class="detail-author">
               <div class="author-avatar">
-                <span>
-                  {{ getInitial(resource.profiles?.display_name || resource.profiles?.username) }}
-                </span>
+                <UserAvatar :src="resource.profiles?.avatar_url || resource.profiles?.avatar" :alt="resource.profiles?.display_name || resource.profiles?.username || 'Profile picture'" :icon-size="19" />
               </div>
 
               <div>
@@ -347,7 +337,17 @@
           </div>
 
           <div class="comments-list">
-            <div v-for="comment in comments" :key="comment.id" class="comment-item">
+            <div v-if="commentsLoading" class="comments-loading">
+              <LoaderCircle :size="22" class="spin" />
+              <span>Loading comments...</span>
+            </div>
+            <div v-else-if="commentsError" class="comments-error" role="alert">
+              <span>{{ commentsError }}</span>
+              <button type="button" @click="loadComments">Try again</button>
+            </div>
+            <template v-else>
+            <article v-for="comment in comments" :key="comment.id" class="comment-thread">
+            <div class="comment-item">
               <RouterLink
                 v-if="comment.profiles?.id"
                 :to="{
@@ -359,10 +359,10 @@
                 class="comment-avatar"
                 @click.stop
               >
-                {{ getInitial(comment.profiles.display_name || comment.profiles.username) }}
+                <UserAvatar :src="comment.profiles.avatar_url || comment.profiles.avatar" :alt="comment.profiles.display_name || comment.profiles.username || 'Profile picture'" :icon-size="15" />
               </RouterLink>
 
-              <div v-else class="comment-avatar">?</div>
+              <div v-else class="comment-avatar"><UserAvatar :icon-size="15" /></div>
 
               <div class="comment-body">
                 <div class="comment-meta">
@@ -387,40 +387,49 @@
                 </div>
 
                 <p>{{ comment.content }}</p>
+                <button type="button" class="reply-comment" @click="replyTo(comment)">Reply</button>
               </div>
             </div>
+              <div v-for="reply in comment.replies || []" :key="reply.id" class="comment-reply">
+                <div class="comment-avatar"><UserAvatar :src="reply.profiles?.avatar_url || reply.profiles?.avatar" :alt="reply.profiles?.display_name || reply.profiles?.username || 'Profile picture'" :icon-size="14" /></div>
+                <div class="comment-body">
+                  <div class="comment-meta"><strong>{{ reply.profiles?.display_name || reply.profiles?.username || 'Follia reader' }}</strong><span>{{ formatCommentTime(reply.created_at) }}</span></div>
+                  <p>{{ reply.content }}</p>
+                </div>
+              </div>
+            </article>
 
-            <div v-if="comments.length === 0 && !commentsLoading" class="comments-empty">
+            <div v-if="comments.length === 0" class="comments-empty">
               <MessageCircle :size="24" />
 
               <p>No comments yet.</p>
 
-              <span> Be the first to share your thoughts. </span>
+              <span>Be the first to share your thoughts.</span>
             </div>
 
-            <div v-if="commentsLoading" class="comments-loading">
-              <LoaderCircle :size="22" class="spin" />
-
-              <span>Loading comments...</span>
-            </div>
+            </template>
           </div>
 
-          <div class="comment-input">
+          <form class="comment-input" @submit.prevent="addComment">
+            <div v-if="replyingTo" class="replying-to">
+              <span>Replying to {{ replyingTo.profiles?.display_name || replyingTo.profiles?.username || 'comment' }}</span>
+              <button type="button" aria-label="Cancel reply" @click="replyingTo = null"><X :size="14" /></button>
+            </div>
+            <p v-if="commentSubmitError" class="comment-submit-error" role="alert">{{ commentSubmitError }}</p>
             <input
               v-model="newComment"
               type="text"
               maxlength="2000"
-              placeholder="Write a comment..."
+              :placeholder="replyingTo ? 'Write a reply...' : 'Write a comment...'"
               :disabled="commentSubmitting"
-              @keyup.enter="addComment"
             />
 
-            <button :disabled="!newComment.trim() || commentSubmitting" @click="addComment">
+            <button type="submit" :disabled="!newComment.trim() || commentSubmitting">
               <LoaderCircle v-if="commentSubmitting" :size="15" class="spin" />
 
               <span v-else>Send</span>
             </button>
-          </div>
+          </form>
         </div>
       </div>
     </Teleport>
@@ -457,6 +466,7 @@ import MainLayout from '../layouts/MainLayout.vue'
 
 import { createResourceSignedUrl, getResource } from '../services/resourceService'
 import { resolveMediaUrl } from '../utils/media'
+import UserAvatar from '../components/UserAvatar.vue'
 
 import { isBookmarked, toggleBookmark } from '../services/bookmarkService'
 
@@ -493,9 +503,12 @@ const comments = ref([])
 const commentCount = ref(0)
 const commentsLoading = ref(false)
 const commentSubmitting = ref(false)
+const commentsError = ref('')
+const commentSubmitError = ref('')
 
 const showComments = ref(false)
 const newComment = ref('')
+const replyingTo = ref(null)
 
 onMounted(() => {
   loadResource()
@@ -632,15 +645,14 @@ async function loadComments() {
   if (!resource.value?.id) return
 
   commentsLoading.value = true
+  commentsError.value = ''
 
   try {
     comments.value = await getResourceComments(resource.value.id)
-
-    commentCount.value = comments.value.length
+    commentCount.value = comments.value.reduce((count, comment) => count + 1 + (comment.replies?.length || 0), 0)
   } catch (error) {
     console.error('Comments error:', error)
-
-    showToast('Unable to load comments.')
+    commentsError.value = error?.message || 'Unable to load comments.'
   } finally {
     commentsLoading.value = false
   }
@@ -654,19 +666,27 @@ async function addComment() {
   }
 
   commentSubmitting.value = true
+  commentSubmitError.value = ''
+  let commentCountRefreshed = false
 
   try {
-    const comment = await addResourceComment(resource.value.id, content)
-
-    comments.value.unshift(comment)
-
-    commentCount.value = comments.value.length
-
+    const comment = await addResourceComment(resource.value.id, content, replyingTo.value?.id || null)
+    if (replyingTo.value) {
+      const parent = comments.value.find((item) => item.id === replyingTo.value.id)
+      if (parent) parent.replies = [...(parent.replies || []), comment]
+      else {
+        await loadComments()
+        commentCountRefreshed = true
+      }
+    } else {
+      comments.value.unshift({ ...comment, replies: comment.replies || [] })
+    }
+    if (!commentCountRefreshed) commentCount.value += 1
     newComment.value = ''
+    replyingTo.value = null
   } catch (error) {
     console.error('Add comment error:', error)
-
-    showToast(error?.message || 'Unable to add your comment.')
+    commentSubmitError.value = error?.message || 'Unable to add your comment.'
   } finally {
     commentSubmitting.value = false
   }
@@ -674,6 +694,13 @@ async function addComment() {
 
 function closeComments() {
   showComments.value = false
+  replyingTo.value = null
+  commentSubmitError.value = ''
+}
+
+function replyTo(comment) {
+  replyingTo.value = comment
+  commentSubmitError.value = ''
 }
 
 async function openResourceFile() {
@@ -752,12 +779,6 @@ function showToast(message) {
 
 function formatPrice(price) {
   return Number(price || 0).toLocaleString('en-NG')
-}
-
-function getInitial(name) {
-  if (!name) return '?'
-
-  return name.trim().charAt(0).toUpperCase()
 }
 
 function formatCommentTime(dateString) {
@@ -1325,11 +1346,29 @@ function formatCommentTime(dateString) {
   padding: 8px 24px 18px;
 }
 
+.comment-thread {
+  padding: 17px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
 .comment-item {
   display: flex;
   gap: 12px;
-  padding: 17px 0;
-  border-bottom: 1px solid var(--border-soft);
+  padding: 0;
+}
+
+.comment-reply {
+  display: flex;
+  gap: 10px;
+  margin: 13px 0 0 48px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-color);
+}
+
+.comment-reply .comment-avatar {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
 }
 
 .comment-avatar {
@@ -1361,6 +1400,7 @@ function formatCommentTime(dateString) {
 }
 
 .comment-meta a,
+.comment-meta strong,
 .comment-meta > span:first-child {
   color: var(--text-main);
   text-decoration: none;
@@ -1379,6 +1419,65 @@ function formatCommentTime(dateString) {
   font-size: 14px;
   line-height: 1.6;
   word-break: break-word;
+}
+
+.reply-comment {
+  margin-top: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.reply-comment:hover { color: var(--text-main); }
+
+.replying-to {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.replying-to button {
+  display: grid;
+  place-items: center;
+  padding: 3px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.comment-submit-error,
+.comments-error {
+  color: #a33b30;
+  font-size: 12px;
+}
+
+.comments-error {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.comments-error button {
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  background: var(--card-bg);
+  color: var(--text-main);
+  cursor: pointer;
 }
 
 .comments-empty,

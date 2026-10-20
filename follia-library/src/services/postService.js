@@ -44,6 +44,7 @@ export async function getPostComments(postId) {
   return api('/api/posts/' + postId + '/comments/')
 }
 
-export async function addPostComment(postId, content) {
-  return api('/api/posts/' + postId + '/comments/', { method: 'POST', body: { content } })
+export async function addPostComment(postId, content, parentId = null) {
+  if (!content?.trim()) throw new Error('Comment cannot be empty.')
+  return api('/api/posts/' + postId + '/comments/', { method: 'POST', body: { content: content.trim(), parent_id: parentId } })
 }

@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.db import models
 
+from config.storage_backends import storage_file_url
+
 
 class BookClub(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="owned_book_clubs")
@@ -15,7 +17,7 @@ class BookClub(models.Model):
 
     @property
     def avatar_url(self):
-        return self.avatar.url if self.avatar else ""
+        return storage_file_url(self.avatar)
 
     @property
     def member_count(self):

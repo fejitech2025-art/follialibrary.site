@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.files.storage import FileSystemStorage
 from django.db import models
 
 
@@ -11,7 +12,8 @@ class Resource(models.Model):
     language = models.CharField(max_length=40, default="English")
     tags = models.JSONField(default=list, blank=True)
     cover = models.FileField(upload_to="resource-covers/",blank=True,)
-    file = models.FileField(upload_to="resources/", blank=True)
+    # Resource documents are intentionally kept in the existing local storage.
+    file = models.FileField(upload_to="resources/", blank=True, storage=FileSystemStorage())
     file_name = models.CharField(max_length=255, blank=True)
     file_type = models.CharField(max_length=120, blank=True)
     is_free = models.BooleanField(default=True)
@@ -49,6 +51,13 @@ class ResourceBookmark(models.Model):
 class ResourceComment(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     resource = models.ForeignKey(Resource, on_delete=models.CASCADE, related_name="comments")
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="replies",
+    )
     content = models.CharField(max_length=2000)
     created_at = models.DateTimeField(auto_now_add=True)
 

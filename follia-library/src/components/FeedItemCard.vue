@@ -3,13 +3,7 @@
     <header class="card-header">
       <RouterLink :to="profileRoute" class="creator-link">
         <div class="avatar">
-          <img
-            v-if="authorAvatarUrl && !authorAvatarFailed"
-            :src="authorAvatarUrl"
-            alt=""
-            @error="authorAvatarFailed = true"
-          />
-          <span v-else>{{ initial }}</span>
+          <UserAvatar :src="authorAvatarUrl" :alt="author?.display_name || author?.username || 'Profile picture'" :icon-size="20" />
         </div>
 
         <span class="creator-copy">
@@ -182,60 +176,67 @@
       </button>
     </div>
 
-    <section v-if="commentsOpen" class="comments-panel">
-      <div v-if="commentsLoading" class="comments-state">
-        Loading conversation…
-      </div>
+    <Teleport to="body">
+      <div v-if="commentsOpen" class="comments-overlay" @click.self="closeComments">
+        <section class="comments-modal" role="dialog" aria-modal="true" aria-labelledby="comments-title">
+          <header class="comments-header">
+            <div><p class="comments-kicker">DISCUSSION</p><h2 id="comments-title">Comments</h2></div>
+            <button class="comments-close" type="button" aria-label="Close comments" @click="closeComments"><X :size="19" /></button>
+          </header>
 
-      <div v-else-if="comments.length" class="comments-list">
-        <div v-for="comment in comments" :key="comment.id" class="comment">
-          <div class="comment-avatar">
-            {{
-              (
-                comment.profiles?.display_name ||
-                comment.profiles?.username ||
-                'F'
-              ).charAt(0).toUpperCase()
-            }}
+          <div class="comments-list">
+            <div v-if="commentsLoading" class="comments-state">Loading conversation…</div>
+            <div v-else-if="commentsError" class="comments-state comments-error" role="alert">
+              <span>{{ commentsError }}</span>
+              <button type="button" @click="loadComments">Try again</button>
+            </div>
+            <template v-else-if="comments.length">
+              <article v-for="comment in comments" :key="comment.id" class="comment-thread">
+                <div class="comment">
+                  <div class="comment-avatar"><UserAvatar :src="comment.profiles?.avatar_url || comment.profiles?.avatar" :alt="comment.profiles?.display_name || comment.profiles?.username || 'Profile picture'" :icon-size="16" /></div>
+                  <div class="comment-copy">
+                    <strong>{{ comment.profiles?.display_name || comment.profiles?.username || 'Follia reader' }}</strong>
+                    <p>{{ comment.content }}</p>
+                    <button class="reply-button" type="button" @click="replyTo(comment)">Reply</button>
+                  </div>
+                </div>
+                <div v-for="reply in comment.replies || []" :key="reply.id" class="comment comment-reply">
+                  <div class="comment-avatar"><UserAvatar :src="reply.profiles?.avatar_url || reply.profiles?.avatar" :alt="reply.profiles?.display_name || reply.profiles?.username || 'Profile picture'" :icon-size="15" /></div>
+                  <div class="comment-copy">
+                    <strong>{{ reply.profiles?.display_name || reply.profiles?.username || 'Follia reader' }}</strong>
+                    <p>{{ reply.content }}</p>
+                  </div>
+                </div>
+              </article>
+            </template>
+            <div v-else class="comments-state">No comments yet. Start the conversation.</div>
           </div>
 
-          <div>
-            <strong>
-              {{
-                comment.profiles?.display_name ||
-                comment.profiles?.username ||
-                'Follia reader'
-              }}
-            </strong>
-            <p>{{ comment.content }}</p>
-          </div>
-        </div>
+          <form class="comment-form" @submit.prevent="submitComment">
+            <div v-if="replyingTo" class="replying-to">
+              <span>Replying to {{ replyingTo.profiles?.display_name || replyingTo.profiles?.username || 'comment' }}</span>
+              <button type="button" aria-label="Cancel reply" @click="replyingTo = null"><X :size="14" /></button>
+            </div>
+            <p v-if="commentSubmitError" class="comment-submit-error" role="alert">{{ commentSubmitError }}</p>
+            <div class="comment-input-row">
+              <input v-model="commentText" maxlength="2000" :placeholder="replyingTo ? 'Write a reply…' : 'Write a comment…'" aria-label="Write a comment" :disabled="commentSubmitting" />
+              <button :disabled="!commentText.trim() || commentSubmitting" aria-label="Send comment">
+                <LoaderCircle v-if="commentSubmitting" :size="16" class="spin" />
+                <Send v-else :size="16" />
+              </button>
+            </div>
+          </form>
+        </section>
       </div>
-
-      <div v-else class="comments-state">Start the conversation.</div>
-
-      <form class="comment-form" @submit.prevent="submitComment">
-        <input
-          v-model="commentText"
-          maxlength="2000"
-          placeholder="Add a thoughtful reply…"
-          aria-label="Write a comment"
-        />
-
-        <button
-          :disabled="!commentText.trim() || commentSubmitting"
-          aria-label="Send comment"
-        >
-          <Send :size="16" />
-        </button>
-      </form>
-    </section>
+    </Teleport>
 
     <div v-if="toast" class="toast">{{ toast }}</div>
   </article>
 </template>
 
 <script setup>
+import { resolveMediaUrl } from '../utils/media'
+
 import { computed, ref } from 'vue'
 import {
   ArrowUpRight,
@@ -244,6 +245,7 @@ import {
   Check,
   Flag,
   Heart,
+  LoaderCircle,
   MessageCircle,
   MoreHorizontal,
   Pencil,
@@ -254,6 +256,7 @@ import {
 } from 'lucide-vue-next'
 
 import { useAuth } from '../composables/useAuth'
+import UserAvatar from './UserAvatar.vue'
 import { toggleBookmark } from '../services/bookmarkService'
 import {
   addResourceComment,
@@ -280,46 +283,6 @@ const props = defineProps({
 
 const { user, initializeAuth } = useAuth()
 
-// Read the backend address from the Vue environment configuration.
-// Example: VITE_API_URL=http://127.0.0.1:8000/api
-const configuredApiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL
-
-const API_BASE_URL = (
-  configuredApiUrl ||
-  (import.meta.env.DEV
-    ? 'http://127.0.0.1:8000'
-    : window.location.origin)
-)
-  .replace(/\/+$/, '')
-  .replace(/\/api$/i, '')
-
-// Convert a relative Django media path into a complete URL.
-// Keep complete external URLs and local blob previews unchanged.
-function resolveMediaUrl(url) {
-  if (!url || typeof url !== 'string') return null
-
-  const value = url.trim()
-  if (!value) return null
-
-  if (
-    /^https?:\/\//i.test(value) ||
-    value.startsWith('blob:') ||
-    value.startsWith('data:')
-  ) {
-    return value
-  }
-
-  if (value.startsWith('//')) {
-    return `${window.location.protocol}${value}`
-  }
-
-  try {
-    return new URL(value, `${API_BASE_URL}/`).href
-  } catch {
-    return null
-  }
-}
-
 const liked = ref(Boolean(props.item.liked))
 const saved = ref(Boolean(props.item.saved))
 const likeCount = ref(props.item.like_count || 0)
@@ -332,8 +295,11 @@ const following = ref(
 const commentsOpen = ref(false)
 const comments = ref([])
 const commentsLoading = ref(false)
+const commentsError = ref('')
+const commentSubmitError = ref('')
 const commentSubmitting = ref(false)
 const commentText = ref('')
+const replyingTo = ref(null)
 const showMenu = ref(false)
 const isDeleted = ref(false)
 const editing = ref(false)
@@ -343,7 +309,6 @@ const currentBody = ref(props.item.body || '')
 const editBody = ref(props.item.body || '')
 const toast = ref('')
 
-const authorAvatarFailed = ref(false)
 const resourceCoverFailed = ref(false)
 const postMediaFailed = ref(false)
 
@@ -365,12 +330,6 @@ const resourceCoverUrl = computed(() =>
 
 const postMediaUrl = computed(() =>
   resolveMediaUrl(props.item.media_url || props.item.media)
-)
-
-const initial = computed(() =>
-  (author.value.display_name || author.value.username || 'F')
-    .charAt(0)
-    .toUpperCase()
 )
 
 const profileRoute = computed(() => ({
@@ -477,21 +436,41 @@ async function toggleFollow() {
 }
 
 async function toggleComments() {
-  commentsOpen.value = !commentsOpen.value
+  if (commentsOpen.value) {
+    closeComments()
+    return
+  }
+  commentsOpen.value = true
+  await loadComments()
+}
 
-  if (!commentsOpen.value || comments.value.length) return
+function closeComments() {
+  commentsOpen.value = false
+  replyingTo.value = null
+  commentText.value = ''
+}
 
+async function loadComments() {
   commentsLoading.value = true
-
+  commentsError.value = ''
   try {
     comments.value = props.item.kind === 'resource'
       ? await getResourceComments(props.item.id)
       : await getPostComments(props.item.id)
+    commentCount.value = comments.value.reduce(
+      (count, comment) => count + 1 + (comment.replies?.length || 0),
+      0,
+    )
   } catch (error) {
-    notify(error.message || 'Unable to load comments.')
+    commentsError.value = error.message || 'Unable to load comments.'
   } finally {
     commentsLoading.value = false
   }
+}
+
+function replyTo(comment) {
+  replyingTo.value = comment
+  commentText.value = ''
 }
 
 async function submitComment() {
@@ -500,17 +479,24 @@ async function submitComment() {
   if (!text || commentSubmitting.value) return
 
   commentSubmitting.value = true
+  commentSubmitError.value = ''
 
   try {
     const comment = props.item.kind === 'resource'
-      ? await addResourceComment(props.item.id, text)
-      : await addPostComment(props.item.id, text)
+      ? await addResourceComment(props.item.id, text, replyingTo.value?.id)
+      : await addPostComment(props.item.id, text, replyingTo.value?.id)
 
-    comments.value.push(comment)
+    if (replyingTo.value) {
+      const parent = comments.value.find((item) => item.id === replyingTo.value.id)
+      if (parent) parent.replies = [...(parent.replies || []), comment]
+    } else {
+      comments.value.unshift({ ...comment, replies: comment.replies || [] })
+    }
     commentCount.value += 1
     commentText.value = ''
+    replyingTo.value = null
   } catch (error) {
-    notify(error.message || 'Unable to add your reply.')
+    commentSubmitError.value = error.message || 'Unable to add your comment.'
   } finally {
     commentSubmitting.value = false
   }
@@ -657,18 +643,30 @@ async function saveEdit() {
 .engagement-button.liked { color:#9e463a; }
 .save-button { margin-left:auto; }
 .save-button.saved { color:var(--text-main); }
-.comments-panel { margin:11px -2px 0; padding-top:13px; border-top:1px solid var(--border-soft); }
-.comments-state { padding:8px 0; color:var(--text-tertiary); font-size:12px; }
-.comments-list { display:grid; gap:13px; max-height:240px; overflow:auto; }
-.comment { display:flex; align-items:flex-start; gap:9px; }
-.comment-avatar { width:28px; height:28px; flex:0 0 28px; display:grid; place-items:center; border-radius:50%; background:var(--icon-bg); font-size:10px; font-weight:700; }
-.comment strong { display:block; margin:1px 0 3px; font-size:11px; }
-.comment p { margin:0; color:var(--text-secondary); font-size:12px; line-height:1.5; white-space:pre-wrap; }
-.comment-form { display:flex; gap:9px; margin-top:13px; }
-.comment-form input { flex:1; min-width:0; height:40px; padding:0 12px; border:1px solid var(--border-color); border-radius:12px; outline:0; background:var(--input-bg); color:var(--text-main); font-size:12px; }
-.comment-form input:focus { border-color:var(--text-tertiary); }
-.comment-form button { width:40px; flex:0 0 40px; display:grid; place-items:center; border-radius:12px; background:var(--primary-bg); color:var(--primary-text); }
-.comment-form button:disabled { opacity:.5; }
+.comments-overlay { position:fixed; inset:0; z-index:400; display:grid; place-items:center; padding:20px; background:rgba(14,15,17,.55); backdrop-filter:blur(5px); }
+.comments-modal { width:min(540px,100%); max-height:min(760px,85dvh); display:grid; grid-template-rows:auto minmax(0,1fr) auto; overflow:hidden; border:1px solid var(--border-color); border-radius:22px; background:var(--card-bg); box-shadow:0 24px 80px rgba(0,0,0,.24); }
+.comments-header { display:flex; align-items:center; justify-content:space-between; padding:18px 20px; border-bottom:1px solid var(--border-soft); }
+.comments-header h2 { margin:0; color:var(--text-main); font:750 19px Manrope,sans-serif; }
+.comments-kicker { margin:0 0 4px; color:var(--text-tertiary); font-size:9px; font-weight:750; letter-spacing:.14em; }
+.comments-close { width:34px; height:34px; display:grid; place-items:center; border-radius:10px; background:var(--icon-bg); color:var(--text-main); }
+.comments-list { min-height:0; display:grid; align-content:start; gap:17px; overflow:auto; padding:18px 20px; overscroll-behavior:contain; }
+.comments-state { padding:24px 10px; color:var(--text-tertiary); font-size:12px; text-align:center; }
+.comments-error button,.reply-button { margin-top:6px; padding:0; background:transparent; color:var(--text-secondary); font-size:10px; font-weight:700; }
+.comment-thread { display:grid; gap:12px; }
+.comment { display:flex; align-items:flex-start; gap:10px; }
+.comment-avatar { width:32px; height:32px; flex:0 0 32px; display:grid; place-items:center; border-radius:50%; background:var(--icon-bg); color:var(--text-secondary); }
+.comment-copy { min-width:0; flex:1; }
+.comment strong { display:block; margin:1px 0 4px; color:var(--text-main); font-size:11px; }
+.comment p { margin:0; color:var(--text-secondary); font-size:12px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
+.comment-reply { margin-left:38px; }
+.comment-form { padding:12px 16px max(13px,env(safe-area-inset-bottom)); border-top:1px solid var(--border-soft); background:var(--card-bg); }
+.replying-to { display:flex; align-items:center; justify-content:space-between; margin:0 0 9px; color:var(--text-tertiary); font-size:10px; }
+.replying-to button { display:grid; place-items:center; width:24px; height:24px; border-radius:7px; background:var(--icon-bg); color:var(--text-secondary); }
+.comment-input-row { display:flex; gap:9px; }
+.comment-input-row input { flex:1; min-width:0; height:42px; padding:0 13px; border:1px solid var(--border-color); border-radius:12px; outline:0; background:var(--input-bg); color:var(--text-main); font-size:12px; }
+.comment-input-row input:focus { border-color:var(--text-tertiary); }
+.comment-input-row button { width:42px; flex:0 0 42px; display:grid; place-items:center; border-radius:12px; background:var(--primary-bg); color:var(--primary-text); }
+.comment-input-row button:disabled { opacity:.5; }
 .toast { position:absolute; right:14px; bottom:64px; padding:10px 13px; border-radius:10px; background:var(--text-main); color:var(--card-bg); font-size:11px; box-shadow:0 5px 16px var(--shadow-color); }
 @media(max-width:480px) {
   .feed-card { padding:15px 14px 11px; border-radius:17px; }
@@ -683,5 +681,8 @@ async function saveEdit() {
   .post-text { font-size:13px; }
   .card-actions { gap:14px; }
   .action-word { display:none; }
+  .comments-overlay { align-items:end; padding:0; }
+  .comments-modal { width:100%; max-height:90dvh; border-radius:22px 22px 0 0; }
+  .comments-list { padding:15px 16px; }
 }
 </style>

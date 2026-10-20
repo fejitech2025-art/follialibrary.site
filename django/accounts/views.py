@@ -18,6 +18,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
+from config.storage_backends import media_storage_available_for_upload
 from .models import Follow, Notification, Profile, notify
 from .serializers import NotificationSerializer, ProfileSerializer
 
@@ -165,6 +166,8 @@ def my_profile(request):
     avatar = request.FILES.get("avatar")
     if avatar and (not (avatar.content_type or "").startswith("image/") or avatar.size > 5 * 1024 * 1024):
         return Response({"detail": "Choose an image smaller than 5 MB."}, status=400)
+    if avatar and not media_storage_available_for_upload():
+        return Response({"detail": "Cloudflare R2 media storage is not configured."}, status=503)
     serializer = ProfileSerializer(profile, data=request.data, partial=True, context={"request": request})
     serializer.is_valid(raise_exception=True)
     serializer.save()
@@ -200,9 +203,9 @@ def follow_user(request, user_id):
     if target == request.user:
         return Response({"detail": "You cannot follow yourself."}, status=400)
     if request.method == "POST":
-        _, created = Follow.objects.get_or_create(follower=request.user, following=target)
+        follow, created = Follow.objects.get_or_create(follower=request.user, following=target)
         if created:
-            notify(target, request.user, "follow")
+            notify(target, request.user, "follow", event_key=f"follow:{follow.pk}")
     else:
         Follow.objects.filter(follower=request.user, following=target).delete()
     return Response({"following": request.method == "POST"})
@@ -244,6 +247,12 @@ def notifications(request):
     return Response(NotificationSerializer(queryset[:100], many=True, context={"request": request}).data)
 
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def unread_notification_count(request):
+    return Response({"count": Notification.objects.filter(recipient=request.user, read=False).count()})
+
+
 @api_view(["POST", "PATCH"])
 @permission_classes([IsAuthenticated])
 def notification_read(request, notification_id):
@@ -260,3 +269,73 @@ def notification_read(request, notification_id):
 def notification_read_all(request):
     Notification.objects.filter(recipient=request.user, read=False).update(read=True)
     return Response({"read": True})
+
+
+@api_view(["GET", "POST", "DELETE"])
+@permission_classes([IsAuthenticated])
+def push_subscriptions(request):
+    from .models import PushSubscription
+
+    if request.method == "GET":
+        return Response({"subscribed": PushSubscription.objects.filter(user=request.user).exists()})
+
+    endpoint = request.data.get("endpoint", "")
+    if request.method == "DELETE":
+        if not isinstance(endpoint, str):
+            return Response({"detail": "A valid push endpoint is required."}, status=400)
+        PushSubscription.objects.filter(user=request.user, endpoint=endpoint).delete()
+        return Response({"subscribed": False})
+
+    from urllib.parse import urlparse
+
+    if not isinstance(endpoint, str) or not endpoint or len(endpoint) > 2048:
+        return Response({"detail": "A valid browser push subscription is required."}, status=400)
+    try:
+        parsed = urlparse(endpoint)
+    except ValueError:
+        return Response({"detail": "This push service endpoint is not supported."}, status=400)
+    allowed_hosts = (
+        "fcm.googleapis.com",
+        "push.services.mozilla.com",
+        "push.apple.com",
+        "notify.windows.com",
+    )
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not host or parsed.username or parsed.password or not any(
+        host == allowed or host.endswith("." + allowed) for allowed in allowed_hosts
+    ):
+        return Response({"detail": "This push service endpoint is not supported."}, status=400)
+
+    keys = request.data.get("keys") or {}
+    p256dh = keys.get("p256dh", "") if isinstance(keys, dict) else ""
+    auth = keys.get("auth", "") if isinstance(keys, dict) else ""
+    if (
+        not isinstance(p256dh, str)
+        or not isinstance(auth, str)
+        or not p256dh
+        or not auth
+        or len(p256dh) > 200
+        or len(auth) > 100
+    ):
+        return Response({"detail": "A valid browser push subscription is required."}, status=400)
+    import hashlib
+
+    endpoint_hash = hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
+    existing = PushSubscription.objects.filter(endpoint_hash=endpoint_hash).first()
+    if existing and existing.user_id != request.user.pk:
+        return Response({"detail": "This browser subscription is already linked to another account."}, status=409)
+    PushSubscription.objects.update_or_create(
+        endpoint_hash=endpoint_hash,
+        defaults={"user": request.user, "endpoint": endpoint, "p256dh": p256dh, "auth": auth},
+    )
+    return Response({"subscribed": True}, status=201)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def push_public_key(request):
+    from django.conf import settings
+
+    if not (settings.VAPID_PUBLIC_KEY and settings.VAPID_PRIVATE_KEY and settings.VAPID_SUBJECT):
+        return Response({"enabled": False, "public_key": ""})
+    return Response({"enabled": True, "public_key": settings.VAPID_PUBLIC_KEY})

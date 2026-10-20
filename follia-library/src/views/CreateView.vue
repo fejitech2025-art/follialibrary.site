@@ -21,7 +21,7 @@
 
       <form v-if="mode === 'post'" class="post-composer" @submit.prevent="publishPost">
         <div class="composer-top">
-          <div class="avatar">{{ initial }}</div>
+          <div class="avatar"><UserAvatar :src="profile?.avatar_url || profile?.avatar" :alt="displayName + ' profile picture'" :icon-size="20" /></div>
           <div><strong>{{ displayName }}</strong><span>Sharing with everyone</span></div>
         </div>
         <label class="sr-only" for="post-body">Write a post</label>
@@ -35,7 +35,7 @@
         <div class="composer-footer">
           <div class="composer-tools">
             <label class="attach-button" for="post-media"><ImagePlus :size="19" /><span>Photo or video</span></label>
-            <input id="post-media" type="file" accept="image/*,video/*" @change="chooseMedia" />
+            <input id="post-media" ref="mediaInput" type="file" accept="image/*,video/*" @change="chooseMedia" />
             <span class="char-count">{{ body.length }}/5000</span>
           </div>
           <button class="publish-button" type="submit" :disabled="publishing || (!body.trim() && !media)">
@@ -59,6 +59,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, ArrowUpRight, BookOpen, ImagePlus, MessageCircle, X } from 'lucide-vue-next'
 import MainLayout from '../layouts/MainLayout.vue'
+import UserAvatar from '../components/UserAvatar.vue'
 import { useAuth } from '../composables/useAuth'
 import { getMyProfile } from '../services/profileService'
 import { createPost } from '../services/postService'
@@ -69,11 +70,11 @@ const mode = ref('post')
 const body = ref('')
 const media = ref(null)
 const mediaPreview = ref('')
+const mediaInput = ref(null)
 const publishing = ref(false)
 const error = ref('')
 const profile = ref(null)
 const displayName = computed(() => profile.value?.display_name || profile.value?.username || user.value?.email || 'Your profile')
-const initial = computed(() => displayName.value.charAt(0).toUpperCase())
 
 onMounted(async () => {
   await initializeAuth()
@@ -83,7 +84,17 @@ onMounted(async () => {
 function chooseMedia(event) {
   const file = event.target.files?.[0]
   if (!file) return
-  if (file.size > 50 * 1024 * 1024) { error.value = 'Choose a file smaller than 50 MB.'; return }
+  error.value = ''
+  if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+    error.value = 'Choose an image or video file.'
+    event.target.value = ''
+    return
+  }
+  if (file.size > 50 * 1024 * 1024) {
+    error.value = 'Choose a file smaller than 50 MB.'
+    event.target.value = ''
+    return
+  }
   clearMedia()
   media.value = file
   mediaPreview.value = URL.createObjectURL(file)
@@ -94,6 +105,7 @@ function clearMedia() {
   if (mediaPreview.value?.startsWith('blob:')) URL.revokeObjectURL(mediaPreview.value)
   media.value = null
   mediaPreview.value = ''
+  if (mediaInput.value) mediaInput.value.value = ''
 }
 
 async function publishPost() {

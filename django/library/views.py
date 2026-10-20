@@ -7,6 +7,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.models import notify
+from config.storage_backends import media_storage_available_for_upload
 from .models import Resource, ResourceBookmark, ResourceComment, ResourceLike
 from .serializers import ResourceCommentSerializer, ResourceSerializer
 
@@ -44,6 +45,8 @@ def resources(request):
         return Response({"detail": "Resource files must be 50 MB or smaller."}, status=400)
     if cover and (not (cover.content_type or "").startswith("image/") or cover.size > 5 * 1024 * 1024):
         return Response({"detail": "Cover images must be images smaller than 5 MB."}, status=400)
+    if cover and not media_storage_available_for_upload():
+        return Response({"detail": "Cloudflare R2 media storage is not configured."}, status=503)
     payload = request.data.copy()
     if "tags" in payload and isinstance(payload["tags"], str):
         payload["tags"] = [tag.strip() for tag in payload["tags"].split(",") if tag.strip()]
@@ -82,6 +85,8 @@ def resource_detail(request, resource_id):
         return Response({"detail": "Resource files must be 50 MB or smaller."}, status=400)
     if cover and (not (cover.content_type or "").startswith("image/") or cover.size > 5 * 1024 * 1024):
         return Response({"detail": "Cover images must be images smaller than 5 MB."}, status=400)
+    if cover and not media_storage_available_for_upload():
+        return Response({"detail": "Cloudflare R2 media storage is not configured."}, status=503)
     payload = request.data.copy()
     if "tags" in payload and isinstance(payload["tags"], str):
         payload["tags"] = [tag.strip() for tag in payload["tags"].split(",") if tag.strip()]
@@ -98,9 +103,9 @@ def resource_like(request, resource_id):
     if not resource:
         return Response({"detail": "Resource not found."}, status=404)
     if request.method == "POST":
-        _, created = ResourceLike.objects.get_or_create(user=request.user, resource=resource)
+        like, created = ResourceLike.objects.get_or_create(user=request.user, resource=resource)
         if created:
-            notify(resource.author, request.user, "like", resource_id=resource.pk)
+            notify(resource.author, request.user, "like", resource_id=resource.pk, event_key=f"resource-like:{like.pk}")
         liked = True
     else:
         ResourceLike.objects.filter(user=request.user, resource=resource).delete()
@@ -128,14 +133,41 @@ def resource_comments(request, resource_id):
     if not resource:
         return Response({"detail": "Resource not found."}, status=404)
     if request.method == "GET":
-        comments = resource.comments.select_related("user__profile")[:100]
+        comments = resource.comments.filter(parent__isnull=True).select_related("user__profile").prefetch_related("replies__user__profile")[:100]
         return Response(ResourceCommentSerializer(comments, many=True, context={"request": request}).data)
     if not request.user.is_authenticated:
         return Response({"detail": "Sign in to comment."}, status=401)
     serializer = ResourceCommentSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    comment = serializer.save(user=request.user, resource=resource)
-    notify(resource.author, request.user, "comment", resource_id=resource.pk)
+    parent_id = request.data.get("parent_id")
+    parent = None
+    if parent_id not in (None, ""):
+        try:
+            parent_id = int(parent_id)
+        except (TypeError, ValueError):
+            return Response({"detail": "Invalid comment to reply to."}, status=400)
+        parent = ResourceComment.objects.filter(
+            pk=parent_id, resource=resource, parent__isnull=True
+        ).select_related("user").first()
+        if not parent:
+            return Response({"detail": "Comment to reply to was not found for this resource."}, status=400)
+    comment = serializer.save(user=request.user, resource=resource, parent=parent)
+    if parent:
+        notify(
+            parent.user,
+            request.user,
+            "comment_reply",
+            resource_id=resource.pk,
+            event_key=f"resource-comment-reply:{comment.pk}",
+        )
+    else:
+        notify(
+            resource.author,
+            request.user,
+            "comment",
+            resource_id=resource.pk,
+            event_key=f"resource-comment:{comment.pk}",
+        )
     return Response(ResourceCommentSerializer(comment, context={"request": request}).data, status=201)
 
 

@@ -37,6 +37,28 @@
         </button>
       </header>
 
+      <section class="push-settings" aria-label="Browser notification settings">
+        <div class="push-settings-icon"><Bell :size="18" /></div>
+        <div class="push-settings-copy">
+          <strong>Hear about activity while you’re away</strong>
+          <p>Allow browser notifications for new follows, comments, replies, and Book Club activity. Your in-app alerts work either way.</p>
+          <p v-if="pushError" class="push-error" role="alert">{{ pushError }}</p>
+          <p v-else-if="pushStatus?.reason === 'unconfigured'" class="push-note">Browser push is not configured for this deployment yet.</p>
+          <p v-else-if="pushStatus?.permission === 'denied'" class="push-note">Notifications are blocked in browser settings. In-app alerts remain available.</p>
+          <p v-else-if="pushStatus?.permission === 'unsupported'" class="push-note">This browser or connection does not support push notifications.</p>
+        </div>
+        <button
+          v-if="pushStatus?.available"
+          type="button"
+          class="push-toggle"
+          :disabled="pushLoading"
+          @click="togglePush"
+        >
+          <LoaderCircle v-if="pushLoading" :size="15" class="spin" />
+          {{ pushLoading ? 'Saving...' : pushStatus.subscribed ? 'Turn off' : 'Enable' }}
+        </button>
+      </section>
+
       <!-- Loading -->
       <section v-if="loading" class="notification-state">
         <LoaderCircle :size="26" class="spin" />
@@ -88,15 +110,7 @@
         >
           <!-- Actor avatar -->
           <div class="notification-avatar">
-            <img
-              v-if="notification.actor?.avatar_url || notification.actor?.avatar"
-              :src="resolveMediaUrl(notification.actor.avatar_url || notification.actor.avatar)"
-              :alt="notification.actor.display_name || notification.actor.username || 'User'"
-            />
-
-            <span v-else>
-              {{ getInitial(notification.actor) }}
-            </span>
+            <UserAvatar :src="notification.actor?.avatar_url || notification.actor?.avatar" :alt="notification.actor?.display_name || notification.actor?.username || 'Profile picture'" :icon-size="18" />
           </div>
 
           <!-- Content -->
@@ -128,7 +142,7 @@
             <!-- Resource hint -->
             <p
               v-else-if="
-                (notification.type === 'like' || notification.type === 'comment') &&
+                (notification.type === 'like' || notification.type === 'comment' || notification.type === 'comment_reply') &&
                 notification.resource_id
               "
               class="notification-hint"
@@ -186,9 +200,12 @@ import {
 } from 'lucide-vue-next'
 
 import MainLayout from '../layouts/MainLayout.vue'
-import { resolveMediaUrl } from '../utils/media'
+import UserAvatar from '../components/UserAvatar.vue'
 
 import {
+  disablePushNotifications,
+  enablePushNotifications,
+  getPushStatus,
   getMyNotifications,
   getNotificationMessage,
   getNotificationTypeLabel,
@@ -206,6 +223,9 @@ const loading = ref(true)
 const errorMessage = ref('')
 
 const markingAll = ref(false)
+const pushLoading = ref(false)
+const pushStatus = ref(null)
+const pushError = ref('')
 
 const toastMessage = ref('')
 
@@ -231,9 +251,35 @@ const bookClubNotificationTypes = [
 
 onMounted(async () => {
   await loadNotifications()
+  await loadPushStatus()
 
   await setupNotificationRealtime()
 })
+
+async function loadPushStatus() {
+  try {
+    pushStatus.value = await getPushStatus()
+  } catch (error) {
+    pushStatus.value = { available: false, reason: 'unconfigured' }
+    pushError.value = error?.message || 'Unable to check browser notification settings.'
+  }
+}
+
+async function togglePush() {
+  if (pushLoading.value || !pushStatus.value?.available) return
+  pushLoading.value = true
+  pushError.value = ''
+  try {
+    if (pushStatus.value.subscribed) await disablePushNotifications()
+    else await enablePushNotifications()
+    await loadPushStatus()
+  } catch (error) {
+    pushError.value = error?.message || 'Unable to update browser notifications.'
+    await loadPushStatus()
+  } finally {
+    pushLoading.value = false
+  }
+}
 
 /*
 |--------------------------------------------------------------------------
@@ -297,6 +343,7 @@ async function setupNotificationRealtime() {
         if (!alreadyExists) {
           notifications.value.unshift(notification)
         }
+        window.dispatchEvent(new Event('follia:notification-change'))
 
         return
       }
@@ -313,6 +360,7 @@ async function setupNotificationRealtime() {
             ...event.notification,
           }
         }
+        window.dispatchEvent(new Event('follia:notification-change'))
 
         return
       }
@@ -322,6 +370,7 @@ async function setupNotificationRealtime() {
        */
       if (event.type === 'delete') {
         notifications.value = notifications.value.filter((item) => item.id !== event.notificationId)
+        window.dispatchEvent(new Event('follia:notification-change'))
       }
     })
   } catch (error) {
@@ -444,27 +493,15 @@ async function handleNotificationClick(notification) {
     return
   }
 
-  if ((notification.type === 'like' || notification.type === 'comment') && notification.post_id) {
+  if ((notification.type === 'like' || notification.type === 'comment' || notification.type === 'comment_reply') && notification.post_id) {
     router.push({ name: 'post-detail', params: { id: notification.post_id } })
     return
   }
 
-  if ((notification.type === 'like' || notification.type === 'comment') && notification.resource_id) {
+  if ((notification.type === 'like' || notification.type === 'comment' || notification.type === 'comment_reply') && notification.resource_id) {
     router.push({ name: 'resource-detail', params: { id: notification.resource_id } })
     return
   }
-}
-
-/*
-|--------------------------------------------------------------------------
-| Avatar initials
-|--------------------------------------------------------------------------
-*/
-
-function getInitial(actor) {
-  const name = actor?.display_name || actor?.username || 'U'
-
-  return name.trim().charAt(0).toUpperCase()
 }
 
 /*
@@ -586,6 +623,26 @@ function showToast(message) {
   font-size: 11px;
   font-weight: 700;
 }
+
+.push-settings {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin: 20px 0 18px;
+  padding: 15px 17px;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background: var(--card-bg);
+}
+
+.push-settings-icon { width: 37px; height: 37px; flex: 0 0 37px; display:grid; place-items:center; border-radius:12px; background:var(--icon-bg); color:var(--text-main); }
+.push-settings-copy { min-width:0; flex:1; }
+.push-settings-copy strong { color:var(--text-main); font-size:12px; }
+.push-settings-copy p { margin:4px 0 0; color:var(--text-secondary); font-size:11px; line-height:1.5; }
+.push-settings-copy .push-error { color:#a33b30; }
+.push-settings-copy .push-note { color:var(--text-tertiary); }
+.push-toggle { min-height:36px; flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:0 12px; border:1px solid var(--border-color); border-radius:10px; background:var(--primary-bg); color:var(--primary-text); font-size:11px; font-weight:700; }
+.push-toggle:disabled { opacity:.6; }
 
 .mark-all-button {
   display: inline-flex;
@@ -932,6 +989,9 @@ function showToast(message) {
 ========================= */
 
 @media (max-width: 700px) {
+  .push-settings { align-items:flex-start; flex-wrap:wrap; }
+  .push-settings-copy { flex-basis:calc(100% - 52px); }
+  .push-toggle { margin-left:50px; }
   .notifications-page {
     padding: 24px 16px 100px;
   }

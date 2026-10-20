@@ -4,9 +4,9 @@ export async function getResourceComments(resourceId) {
   return resourceId ? api('/api/resources/' + resourceId + '/comments/') : []
 }
 
-export async function addResourceComment(resourceId, content) {
+export async function addResourceComment(resourceId, content, parentId = null) {
   if (!content?.trim()) throw new Error('Comment cannot be empty.')
-  return api('/api/resources/' + resourceId + '/comments/', { method: 'POST', body: { content: content.trim() } })
+  return api('/api/resources/' + resourceId + '/comments/', { method: 'POST', body: { content: content.trim(), parent_id: parentId } })
 }
 
 export async function deleteResourceComment(commentId, resourceId) {

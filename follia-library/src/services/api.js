@@ -1,7 +1,12 @@
 
-const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-).replace(/\/$/, '')
+const configuredApiBase =
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? 'http://localhost:8000' : window.location.origin)
+
+const API_BASE = configuredApiBase
+  .replace(/\/+$/, '')
+  .replace(/\/api$/i, '')
 
 async function getCsrfToken() {
   const response = await fetch(`${API_BASE}/api/auth/csrf/`, {
@@ -70,10 +75,22 @@ export async function api(path, options = {}) {
   }
 
   if (!response.ok) {
-    const detail =
-      data?.detail ||
-      data?.email?.[0] ||
-      data?.password?.[0]
+    const firstMessage = (value) => {
+      if (typeof value === 'string') return value
+      if (Array.isArray(value)) return value.map(firstMessage).find(Boolean)
+      if (value && typeof value === 'object') return Object.values(value).map(firstMessage).find(Boolean)
+      return ''
+    }
+    const fieldError = data && typeof data === 'object'
+      ? Object.entries(data).map(([field, value]) => {
+          const message = firstMessage(value)
+          if (!message) return ''
+          return field === 'non_field_errors' || field === 'detail'
+            ? message
+            : `${field.replaceAll('_', ' ')}: ${message}`
+        }).find(Boolean)
+      : ''
+    const detail = data?.detail || fieldError
 
     throw new Error(detail || `Request failed (${response.status}).`)
   }
@@ -89,7 +106,7 @@ export function getGoogleLoginUrl() {
   return `${API_BASE}/accounts/google/login/`
 }
 
-export async function submitGoogleLogin() {
+export async function submitGoogleLogin(next = '') {
   const token = await getCsrfToken()
 
   const form = document.createElement('form')
@@ -102,6 +119,15 @@ export async function submitGoogleLogin() {
   field.value = token
 
   form.appendChild(field)
+
+  if (next) {
+    const redirect = document.createElement('input')
+    redirect.type = 'hidden'
+    redirect.name = 'next'
+    redirect.value = next
+    form.appendChild(redirect)
+  }
+
   document.body.appendChild(form)
   form.submit()
 }

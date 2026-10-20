@@ -19,16 +19,7 @@
         <div class="profile-hero">
           <!-- Avatar -->
           <div class="profile-avatar-large">
-            <img
-              v-if="profileAvatarUrl"
-              :src="profileAvatarUrl"
-              :alt="profile.display_name || 'Profile avatar'"
-              @error="profileAvatarFailed = true"
-            />
-
-            <span v-else>
-              {{ profileInitial }}
-            </span>
+            <UserAvatar :src="profile.avatar_url || profile.avatar" :alt="profile.display_name || 'Profile picture'" :icon-size="36" />
           </div>
 
           <!-- Main information -->
@@ -51,25 +42,9 @@
 
             <!-- Profile statistics -->
             <div class="profile-stats">
-              <button type="button" @click="activeTab = 'Resources'">
-                <strong>{{ resources.length }}</strong>
-                <span>Resources</span>
-              </button>
-
-              <button type="button" @click="activeTab = 'Following'">
-                <strong>{{ followingCount }}</strong>
-                <span>Following</span>
-              </button>
-
-              <button type="button" @click="activeTab = 'Followers'">
-                <strong>{{ followerCount }}</strong>
-                <span>Followers</span>
-              </button>
-
-              <button type="button" @click="activeTab = 'Saved'">
-                <strong>{{ savedResources.length }}</strong>
-                <span>Saved</span>
-              </button>
+              <button type="button" @click="activeTab = 'Followers'"><Users :size="16" /><strong>{{ followerCount }}</strong><span>Followers</span></button>
+              <button type="button" @click="activeTab = 'Following'"><UserRound :size="16" /><strong>{{ followingCount }}</strong><span>Following</span></button>
+              <span class="profile-stat-item"><Heart :size="16" /><strong>{{ profile.like_count || 0 }}</strong><span>Likes</span></span>
             </div>
           </div>
         </div>
@@ -97,13 +72,20 @@
               {{ followerCount }}
             </span>
 
-            <span v-else>
+            <span v-else-if="tab === 'Following'">
               {{ followingCount }}
             </span>
           </button>
         </div>
 
         <div class="profile-content">
+          <template v-if="activeTab === 'Posts'">
+            <SectionHeader eyebrow="YOUR CONTENT" title="Posts you've shared" />
+            <div v-if="postsLoading" class="content-loading"><LoaderCircle :size="22" class="spin" /><p>Loading your posts...</p></div>
+            <div v-else-if="posts.length" class="posts-list"><FeedItemCard v-for="post in posts" :key="post.id" :item="{ ...post, kind: 'post' }" /></div>
+            <div v-else class="empty-state"><div class="empty-icon"><MessageCircle :size="24" /></div><h2>No posts yet</h2><p>Your published images, videos, and posts will appear here.</p><RouterLink to="/create" class="primary-button">Create a post</RouterLink></div>
+          </template>
+
           <!-- RESOURCES -->
           <template v-if="activeTab === 'Resources'">
             <SectionHeader
@@ -234,16 +216,7 @@
                   class="follow-person"
                 >
                   <div class="follow-avatar">
-                    <img
-                      v-if="getPersonAvatarUrl(person)"
-                      :src="getPersonAvatarUrl(person)"
-                      :alt="person.display_name || person.username || 'User avatar'"
-                      @error="markPersonAvatarFailed(person)"
-                    />
-
-                    <span v-else>
-                      {{ getInitial(person.display_name || person.username) }}
-                    </span>
+                    <UserAvatar :src="person.avatar_url || person.avatar" :alt="person.display_name || person.username || 'Profile picture'" :icon-size="18" />
                   </div>
 
                   <div class="follow-person-info">
@@ -332,16 +305,7 @@
                   class="follow-person"
                 >
                   <div class="follow-avatar">
-                    <img
-                      v-if="getPersonAvatarUrl(person)"
-                      :src="getPersonAvatarUrl(person)"
-                      :alt="person.display_name || person.username || 'User avatar'"
-                      @error="markPersonAvatarFailed(person)"
-                    />
-
-                    <span v-else>
-                      {{ getInitial(person.display_name || person.username) }}
-                    </span>
+                    <UserAvatar :src="person.avatar_url || person.avatar" :alt="person.display_name || person.username || 'Profile picture'" :icon-size="18" />
                   </div>
 
                   <div class="follow-person-info">
@@ -419,18 +383,24 @@ import {
   Bookmark,
   BookOpen,
   LoaderCircle,
+  Heart,
+  MessageCircle,
   Pencil,
   Trash2,
+  UserRound,
   Users,
 } from 'lucide-vue-next'
 
 import MainLayout from '../layouts/MainLayout.vue'
 import SectionHeader from '../components/SectionHeader.vue'
 import ResourceCard from '../components/ResourceCard.vue'
+import FeedItemCard from '../components/FeedItemCard.vue'
+import UserAvatar from '../components/UserAvatar.vue'
 
 import { getMyProfile } from '../services/profileService'
 import { getPublisherResources } from '../services/publisherService'
 import { getMyBookmarks } from '../services/bookmarkService'
+import { getPosts } from '../services/postService'
 
 import {
   getFollowing,
@@ -441,73 +411,9 @@ import {
 
 import { deleteResource } from '../services/resourceService'
 
-/*
-|--------------------------------------------------------------------------
-| API and media URLs
-|--------------------------------------------------------------------------
-|
-| Local .env.development:
-| VITE_API_URL=http://127.0.0.1:8000/api
-|
-| Production .env.production:
-| VITE_API_URL=https://your-backend-domain.com/api
-|
-| Set the production value to the actual deployed Django API URL.
-| The resolver removes the trailing /api before resolving media paths.
-|
-*/
-
-const configuredApiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL
-
-const API_BASE_URL = (
-  configuredApiUrl ||
-  (import.meta.env.DEV
-    ? 'http://127.0.0.1:8000'
-    : window.location.origin)
-)
-  .replace(/\/+$/, '')
-  .replace(/\/api$/i, '')
-
-/**
- * Resolve Django media paths against the backend host.
- *
- * Examples:
- * /media/avatars/user.jpg
- * avatars/user.jpg
- * https://cdn.example.com/user.jpg
- */
-function resolveMediaUrl(url) {
-  if (!url || typeof url !== 'string') {
-    return null
-  }
-
-  const value = url.trim()
-
-  if (!value) {
-    return null
-  }
-
-  // Keep complete URLs and local previews unchanged.
-  if (/^(https?:\/\/|blob:|data:)/i.test(value)) {
-    return value
-  }
-
-  // Handle protocol-relative URLs.
-  if (value.startsWith('//')) {
-    return `${window.location.protocol}${value}`
-  }
-
-  try {
-    return new URL(value, `${API_BASE_URL}/`).href
-  } catch (error) {
-    console.error('Unable to resolve media URL:', error)
-    return null
-  }
-}
-
 const activeTab = ref('Resources')
 
-const tabs = ['Resources', 'Saved', 'Followers', 'Following']
+const tabs = ['Resources', 'Posts', 'Saved', 'Followers', 'Following']
 
 const profile = ref({
   id: '',
@@ -521,6 +427,7 @@ const profile = ref({
 })
 
 const resources = ref([])
+const posts = ref([])
 const savedResources = ref([])
 const following = ref([])
 const followers = ref([])
@@ -540,6 +447,7 @@ const followerCount = ref(0)
 
 const loading = ref(true)
 const resourcesLoading = ref(false)
+const postsLoading = ref(false)
 const savedLoading = ref(false)
 const followingLoading = ref(false)
 const followersLoading = ref(false)
@@ -550,65 +458,6 @@ const resourceError = ref('')
 
 const unfollowingId = ref(null)
 const deletingResourceId = ref(null)
-
-const profileAvatarFailed = ref(false)
-
-/*
- * Track failed follower/following avatar requests by user ID.
- * A Set is replaced on update so Vue reacts to changes.
- */
-const failedPersonAvatarIds = ref(new Set())
-
-const profileAvatarUrl = computed(() => {
-  if (profileAvatarFailed.value) {
-    return null
-  }
-
-  return resolveMediaUrl(profile.value?.avatar_url || profile.value?.avatar)
-})
-
-const profileInitial = computed(() => {
-  return (
-    profile.value.display_name?.charAt(0)?.toUpperCase() ||
-    profile.value.username?.charAt(0)?.toUpperCase() ||
-    'U'
-  )
-})
-
-function getInitial(name) {
-  return name?.trim()?.charAt(0)?.toUpperCase() || 'U'
-}
-
-function getPersonAvatarKey(person) {
-  return String(person?.id || person?.username || '')
-}
-
-function getPersonAvatarUrl(person) {
-  const key = getPersonAvatarKey(person)
-
-  if (key && failedPersonAvatarIds.value.has(key)) {
-    return null
-  }
-
-  return resolveMediaUrl(
-    person?.avatar_url ||
-    person?.avatar ||
-    person?.user?.avatar_url ||
-    person?.user?.avatar,
-  )
-}
-
-function markPersonAvatarFailed(person) {
-  const key = getPersonAvatarKey(person)
-
-  if (!key) {
-    return
-  }
-
-  const updated = new Set(failedPersonAvatarIds.value)
-  updated.add(key)
-  failedPersonAvatarIds.value = updated
-}
 
 /*
 |--------------------------------------------------------------------------
@@ -650,6 +499,18 @@ const normalizedSavedResources = computed(() => {
     .filter(Boolean)
 })
 
+async function loadPosts() {
+  postsLoading.value = true
+  try {
+    posts.value = await getPosts({ author: profile.value.id })
+  } catch (error) {
+    console.error('My posts error:', error)
+    posts.value = []
+  } finally {
+    postsLoading.value = false
+  }
+}
+
 /*
 |--------------------------------------------------------------------------
 | Load profile
@@ -659,7 +520,6 @@ const normalizedSavedResources = computed(() => {
 async function loadProfile() {
   loading.value = true
   errorMessage.value = ''
-  profileAvatarFailed.value = false
 
   try {
     const result = await getMyProfile()
@@ -688,6 +548,7 @@ async function loadProfile() {
 
   await Promise.all([
     loadResources(),
+    loadPosts(),
     loadSavedResources(),
     loadFollowing(),
     loadFollowers(),
@@ -1004,8 +865,8 @@ onMounted(() => {
 .profile-stats button,
 .profile-stat-item {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  align-items: center;
+  gap: 7px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1029,6 +890,10 @@ onMounted(() => {
 .profile-stat-item {
   cursor: default;
 }
+
+.profile-stats button > svg,
+.profile-stat-item > svg { color:var(--text-tertiary); flex:0 0 auto; }
+.posts-list { display:grid; gap:13px; max-width:680px; margin-top:24px; }
 
 /* TABS */
 

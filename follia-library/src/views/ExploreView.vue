@@ -88,15 +88,7 @@
               class="person-card"
             >
               <div class="person-avatar">
-                <img
-                  v-if="personAvatarUrl(person) && !hasFailedImage(`person-${person.id}`)"
-                  :src="personAvatarUrl(person)"
-                  alt=""
-                  @error="handleImageError(`person-${person.id}`)"
-                />
-                <span v-else>
-                  {{ (person.display_name || person.username || 'F').charAt(0).toUpperCase() }}
-                </span>
+                <UserAvatar :src="person.avatar_url || person.avatar" :alt="person.display_name || person.username || 'Profile picture'" :icon-size="20" />
               </div>
 
               <strong>{{ person.display_name || person.username }}</strong>
@@ -209,6 +201,8 @@
 </template>
 
 <script setup>
+import { resolveMediaUrl } from '../utils/media'
+
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -220,6 +214,7 @@ import {
 } from 'lucide-vue-next'
 
 import MainLayout from '../layouts/MainLayout.vue'
+import UserAvatar from '../components/UserAvatar.vue'
 import FeedItemCard from '../components/FeedItemCard.vue'
 
 import { getFeed } from '../services/postService'
@@ -229,59 +224,6 @@ import { searchLibrary } from '../services/searchService'
 
 const route = useRoute()
 const router = useRouter()
-
-/*
-|--------------------------------------------------------------------------
-| Backend media URL handling
-|--------------------------------------------------------------------------
-|
-| Development:
-| VITE_API_URL=http://127.0.0.1:8000/api
-|
-| Production:
-| Set VITE_API_URL to your deployed backend API URL.
-*/
-
-const configuredApiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL
-
-const API_BASE_URL = (
-  configuredApiUrl ||
-  (import.meta.env.DEV
-    ? 'http://127.0.0.1:8000'
-    : window.location.origin)
-)
-  .replace(/\/+$/, '')
-  .replace(/\/api$/i, '')
-
-function resolveMediaUrl(url) {
-  if (!url || typeof url !== 'string') {
-    return null
-  }
-
-  const value = url.trim()
-
-  if (!value) {
-    return null
-  }
-
-  // Preserve full URLs and temporary local image previews.
-  if (/^(https?:\/\/|blob:|data:)/i.test(value)) {
-    return value
-  }
-
-  if (value.startsWith('//')) {
-    return `${window.location.protocol}${value}`
-  }
-
-  try {
-    // Resolve Django paths such as /media/avatars/user.jpg
-    // against the backend origin rather than the Vue origin.
-    return new URL(value, `${API_BASE_URL}/`).href
-  } catch (error) {
-    console.error('Unable to resolve media URL:', error)
-    return null
-  }
-}
 
 /*
 |--------------------------------------------------------------------------

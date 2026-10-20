@@ -1,8 +1,10 @@
-from django.urls import reverse
 from rest_framework import serializers
 
 from accounts.serializers import ProfileSerializer
+from config.serializer_fields import SafeStorageFileField
+from config.storage_backends import storage_file_url
 from library.serializers import ResourceSerializer
+from library.models import Resource
 from .models import BookClub, BookClubMembership, BookClubMessage, BookClubResource
 
 
@@ -18,6 +20,7 @@ class MembershipSerializer(serializers.ModelSerializer):
 class BookClubSerializer(serializers.ModelSerializer):
     owner_id = serializers.IntegerField(read_only=True)
     profiles = ProfileSerializer(source="owner.profile", read_only=True)
+    avatar = SafeStorageFileField(required=False, allow_null=True)
     avatar_url = serializers.SerializerMethodField()
     members = MembershipSerializer(source="memberships", many=True, read_only=True)
     book_club_members = MembershipSerializer(source="memberships", many=True, read_only=True)
@@ -30,10 +33,7 @@ class BookClubSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "owner_id", "created_at", "members", "book_club_members", "member_count", "profiles", "avatar_url", "is_member"]
 
     def get_avatar_url(self, obj):
-        request = self.context.get("request")
-        if not obj.avatar:
-            return ""
-        return request.build_absolute_uri(obj.avatar.url) if request else obj.avatar.url
+        return storage_file_url(obj.avatar, self.context.get("request"))
 
     def get_is_member(self, obj):
         request = self.context.get("request")
@@ -44,11 +44,24 @@ class BookClubResourceSerializer(serializers.ModelSerializer):
     club_id = serializers.IntegerField(read_only=True)
     resource_id = serializers.IntegerField(read_only=True)
     resources = ResourceSerializer(source="resource", read_only=True)
-    added_by = serializers.IntegerField(read_only=True)
+    added_by = serializers.IntegerField(source="added_by_id", read_only=True)
 
     class Meta:
         model = BookClubResource
         fields = ["id", "club_id", "resource_id", "added_by", "added_at", "resources"]
+
+
+class BookClubResourceCreateSerializer(serializers.Serializer):
+    resource_id = serializers.PrimaryKeyRelatedField(
+        queryset=Resource.objects.filter(status="published"),
+        source="resource",
+    )
+
+    def to_internal_value(self, data):
+        if "resource_id" not in data and "resourceId" in data:
+            data = data.copy()
+            data["resource_id"] = data.get("resourceId")
+        return super().to_internal_value(data)
 
 
 class BookClubMessageSerializer(serializers.ModelSerializer):

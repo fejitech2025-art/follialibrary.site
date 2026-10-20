@@ -8,14 +8,14 @@
     <div class="auth-heading">
       <p class="auth-kicker">WELCOME BACK</p>
       <h1>Sign in</h1>
-      <p>Continue to your Follia Library.</p>
+      <p>Sign in or create your account in one simple step.</p>
     </div>
 
     <!-- Google sign-in -->
     <button
       class="google-button"
       type="button"
-      :disabled="googleLoading || loading"
+      :disabled="googleLoading"
       @click="signInWithGoogle"
     >
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -40,79 +40,11 @@
       <span>{{ googleLoading ? 'Connecting to Google...' : 'Continue with Google' }}</span>
     </button>
 
-    <div class="auth-divider">
-      <span>or continue with email</span>
+    <p class="google-account-note">You’ll need a Google account to sign in or create an account.</p>
+
+    <div v-if="errorMessage" class="auth-error" role="alert">
+      {{ errorMessage }}
     </div>
-
-    <form class="auth-form" @submit.prevent="handleLogin">
-      <div class="auth-field">
-        <label for="email">Email</label>
-
-        <input
-          id="email"
-          v-model.trim="email"
-          type="email"
-          autocomplete="email"
-          placeholder="you@example.com"
-          required
-        />
-      </div>
-
-      <div class="auth-field">
-        <div class="auth-label-row">
-          <label for="password">Password</label>
-
-          <RouterLink
-            to="/forgot-password"
-            aria-disabled="true"
-            @click.capture.prevent
-          >Forgot password?</RouterLink>
-        </div>
-
-        <div class="password-input">
-          <input
-            id="password"
-            v-model="password"
-            :type="showPassword ? 'text' : 'password'"
-            autocomplete="current-password"
-            placeholder="Enter your password"
-            required
-          />
-
-          <button
-            type="button"
-            class="password-toggle"
-            @click="showPassword = !showPassword"
-          >
-            {{ showPassword ? 'Hide' : 'Show' }}
-          </button>
-        </div>
-      </div>
-
-      <div v-if="errorMessage" class="auth-error" role="alert">
-        {{ errorMessage }}
-      </div>
-
-      <button class="auth-submit" type="submit" :disabled="loading || googleLoading">
-        {{ loading ? 'Signing in...' : 'Sign in' }}
-      </button>
-    </form>
-
-    <div v-if="showVerificationHelp" class="verification-help">
-      <div>
-        <strong>Email not verified?</strong>
-        <span>Check your inbox or request another verification email.</span>
-      </div>
-
-      <button type="button" :disabled="resending" @click="resendVerification">
-        {{ resending ? 'Sending...' : 'Resend email' }}
-      </button>
-    </div>
-
-    <p class="auth-switch">
-      Don't have an account?
-      <RouterLink to="/register">Create one</RouterLink>
-    </p>
 
     <button class="auth-terms-link" type="button" @click="showPolicyModal = true">
       Terms & Privacy Policy
@@ -338,72 +270,30 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import BrandLogo from '../components/BrandLogo.vue'
 import AuthLayout from '../components/auth/AuthLayout.vue'
-import { useAuth } from '../composables/useAuth'
-import { api, submitGoogleLogin } from '../services/api'
+import { submitGoogleLogin } from '../services/api'
 
-const router = useRouter()
-const { signIn } = useAuth()
-
-const email = ref('')
-const password = ref('')
-const showPassword = ref(false)
-const loading = ref(false)
+const route = useRoute()
 const googleLoading = ref(false)
-const resending = ref(false)
 const errorMessage = ref('')
-const showVerificationHelp = ref(false)
 const showPolicyModal = ref(false)
 
-async function handleLogin() {
-  errorMessage.value = ''
-  showVerificationHelp.value = false
-  loading.value = true
-
-  try {
-    await signIn(email.value, password.value)
-    await router.push('/')
-  } catch (error) {
-    errorMessage.value = error.message || 'Unable to sign in.'
-    showVerificationHelp.value = errorMessage.value.toLowerCase().includes('verify your email')
-  } finally {
-    loading.value = false
-  }
-}
-
-async function resendVerification() {
-  if (!email.value) {
-    errorMessage.value = 'Enter your email address first.'
-    return
-  }
-
-  resending.value = true
-
-  try {
-    await api('/api/auth/resend-verification/', {
-      method: 'POST',
-      body: { email: email.value },
-    })
-
-    errorMessage.value = 'If the address needs verification, a new email has been sent.'
-  } catch (error) {
-    errorMessage.value = error.message || 'Unable to resend the verification email.'
-  } finally {
-    resending.value = false
-  }
-}
-
 async function signInWithGoogle() {
-  if (googleLoading.value || loading.value) return
+  if (googleLoading.value) return
 
   errorMessage.value = ''
-  showVerificationHelp.value = false
   googleLoading.value = true
 
   try {
-    await submitGoogleLogin()
+    const requestedPath = typeof route.query.redirect === 'string'
+      ? route.query.redirect
+      : '/'
+    const safePath = requestedPath.startsWith('/') && !requestedPath.startsWith('//')
+      ? requestedPath
+      : '/'
+    await submitGoogleLogin(window.location.origin + safePath)
   } catch (error) {
     errorMessage.value = error.message || 'Google sign-in could not be started.'
     googleLoading.value = false
@@ -412,6 +302,15 @@ async function signInWithGoogle() {
 </script>
 
 <style scoped>
+.google-account-note {
+  max-width: 300px;
+  margin: 16px auto 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+
 .auth-terms-link {
   display: block;
   margin: 18px auto 0;

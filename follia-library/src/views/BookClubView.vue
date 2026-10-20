@@ -121,19 +121,11 @@
                       class="message-avatar-link"
                       @click.stop
                     >
-                      <img
-                        v-if="getMessageAvatarUrl(message) && !isMessageAvatarFailed(message.id)"
-                        :src="getMessageAvatarUrl(message)"
-                        :alt="getProfileName(message.profiles)"
-                        @error="markMessageAvatarFailed(message.id)"
-                      />
-                      <div v-else class="message-avatar">
-                        {{ getInitial(message.profiles) }}
-                      </div>
+                      <UserAvatar :src="message.profiles?.avatar_url || message.profiles?.avatar" :alt="getProfileName(message.profiles)" :icon-size="16" />
                     </RouterLink>
 
                     <div v-else-if="message.sender_id !== currentUserId" class="message-avatar">
-                      {{ getInitial(message.profiles) }}
+                      <UserAvatar :src="message.profiles?.avatar_url || message.profiles?.avatar" :alt="getProfileName(message.profiles)" :icon-size="16" />
                     </div>
 
                     <div class="message-main" :class="{ 'own-main': message.sender_id === currentUserId }">
@@ -242,6 +234,7 @@
                   autocomplete="off"
                   maxlength="2000"
                   @focus="closeMessageMenu"
+                  @input="messageSendError = ''"
                 />
 
                 <button
@@ -254,6 +247,7 @@
                   <Send v-else :size="18" />
                 </button>
               </div>
+              <p v-if="messageSendError" class="message-send-error" role="alert">{{ messageSendError }}</p>
             </form>
           </div>
         </section>
@@ -305,6 +299,9 @@
               </button>
             </div>
 
+            <p v-if="bookManagerError" class="book-manager-message error" role="alert">{{ bookManagerError }}</p>
+            <p v-else-if="bookManagerNotice" class="book-manager-message" role="status">{{ bookManagerNotice }}</p>
+
             <div v-if="bookSearchResults.length" class="search-results">
               <div class="search-results-title">Follia Library</div>
 
@@ -334,7 +331,7 @@
                 <button
                   type="button"
                   class="add-book-button"
-                  :disabled="addingBookId === resource.id || isBookAlreadyAdded(resource.id)"
+                  :disabled="Boolean(addingBookId) || isBookAlreadyAdded(resource.id)"
                   @click="addBook(resource)"
                 >
                   <LoaderCircle v-if="addingBookId === resource.id" class="spin" :size="14" />
@@ -476,13 +473,7 @@
                   class="member-row"
                 >
                   <div class="member-avatar">
-                    <img
-                      v-if="getMemberAvatarUrl(member) && !isMemberAvatarFailed(member.id)"
-                      :src="getMemberAvatarUrl(member)"
-                      :alt="getProfileName(member.profiles)"
-                      @error="markMemberAvatarFailed(member.id)"
-                    />
-                    <span v-else>{{ getInitial(member.profiles) }}</span>
+                    <UserAvatar :src="member.profiles?.avatar_url || member.profiles?.avatar" :alt="getProfileName(member.profiles)" :icon-size="16" />
                   </div>
 
                   <div class="member-info">
@@ -588,6 +579,8 @@
 </template>
 
 <script setup>
+import { resolveMediaUrl } from '../utils/media'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MainLayout from '../layouts/MainLayout.vue'
@@ -636,65 +629,14 @@ import {
 } from '../services/bookClubService'
 
 import { getCurrentUserId } from '../services/profileService'
+import UserAvatar from '../components/UserAvatar.vue'
 
 const route = useRoute()
 const router = useRouter()
 
-/*
-|--------------------------------------------------------------------------
-| Media URL handling
-|--------------------------------------------------------------------------
-| VITE_API_URL should contain the API URL, for example:
-| Development: http://127.0.0.1:8000/api
-| Production:  https://your-backend-domain.example/api
-|
-| The helper removes the trailing /api so Django media paths beginning
-| with /media/ resolve against the backend origin, not the Vue origin.
-|--------------------------------------------------------------------------
-*/
-
-const configuredApiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL
-
-const API_BASE_URL = (
-  configuredApiUrl ||
-  (import.meta.env.DEV ? 'http://127.0.0.1:8000' : window.location.origin)
-)
-  .replace(/\/+$/, '')
-  .replace(/\/api$/i, '')
-
-function resolveMediaUrl(url) {
-  if (!url || typeof url !== 'string') return null
-
-  const value = url.trim()
-  if (!value) return null
-
-  if (/^(https?:\/\/|blob:|data:)/i.test(value)) return value
-
-  if (value.startsWith('//')) {
-    return `${window.location.protocol}${value}`
-  }
-
-  try {
-    return new URL(value, `${API_BASE_URL}/`).href
-  } catch (err) {
-    console.error('Unable to resolve media URL:', err)
-    return null
-  }
-}
-
 function getResourceCoverUrl(resource) {
   if (!resource) return null
   return resolveMediaUrl(resource.cover_url || resource.cover)
-}
-
-function getMemberAvatarUrl(member) {
-  const profile = member?.profiles || member?.profile
-  return resolveMediaUrl(profile?.avatar_url || profile?.avatar)
-}
-
-function getMessageAvatarUrl(message) {
-  const profile = message?.profiles || message?.profile
-  return resolveMediaUrl(profile?.avatar_url || profile?.avatar)
 }
 
 /*
@@ -718,29 +660,11 @@ const messages = ref([])
 
 const clubAvatarFailed = ref(false)
 const editAvatarFailed = ref(false)
-const failedMessageAvatarIds = ref(new Set())
-const failedMemberAvatarIds = ref(new Set())
 const failedResourceCoverIds = ref(new Set())
 
 const clubAvatarUrl = computed(() =>
   resolveMediaUrl(club.value?.avatar_url || club.value?.avatar),
 )
-
-function isMessageAvatarFailed(id) {
-  return failedMessageAvatarIds.value.has(id)
-}
-
-function markMessageAvatarFailed(id) {
-  failedMessageAvatarIds.value = new Set([...failedMessageAvatarIds.value, id])
-}
-
-function isMemberAvatarFailed(id) {
-  return failedMemberAvatarIds.value.has(id)
-}
-
-function markMemberAvatarFailed(id) {
-  failedMemberAvatarIds.value = new Set([...failedMemberAvatarIds.value, id])
-}
 
 function isResourceCoverFailed(id) {
   return failedResourceCoverIds.value.has(id)
@@ -776,6 +700,7 @@ const activeTab = ref('chat')
 
 const messageText = ref('')
 const sendingMessage = ref(false)
+const messageSendError = ref('')
 const replyingTo = ref(null)
 const messagesContainer = ref(null)
 const activeMessageMenu = ref(null)
@@ -813,6 +738,8 @@ const searchingBooks = ref(false)
 const addingBookId = ref(null)
 const downloadingBookId = ref(null)
 const hasSearchedBooks = ref(false)
+const bookManagerError = ref('')
+const bookManagerNotice = ref('')
 
 let realtimeChannel = null
 
@@ -929,6 +856,8 @@ async function searchBooks() {
   if (!canManageBooks.value || !isMember.value) return
 
   searchingBooks.value = true
+  bookManagerError.value = ''
+  bookManagerNotice.value = ''
   hasSearchedBooks.value = true
   failedResourceCoverIds.value = new Set()
 
@@ -952,23 +881,20 @@ async function addBook(resource) {
   if (isBookAlreadyAdded(resource.id)) return
 
   addingBookId.value = resource.id
+  bookManagerError.value = ''
+  bookManagerNotice.value = ''
 
   try {
-    await addBookToBookClub(route.params.id, resource.id)
-    await loadBooks()
+    const added = await addBookToBookClub(route.params.id, resource.id)
+    if (!isBookAlreadyAdded(resource.id)) books.value = [...books.value, added]
 
     bookSearchResults.value = bookSearchResults.value.filter(
       (item) => item.id !== resource.id,
     )
+    bookManagerNotice.value = added?.created ? 'Book added to this Book Club.' : 'This book is already in the Book Club.'
   } catch (err) {
     console.error('Add Book Club book error:', err)
-
-    if (err?.code === '23505') {
-      await loadBooks()
-      window.alert('This book is already in the Book Club.')
-    } else {
-      window.alert(err?.message || 'Unable to add this book.')
-    }
+    bookManagerError.value = err?.message || 'Unable to add this book.'
   } finally {
     addingBookId.value = null
   }
@@ -1097,15 +1023,18 @@ async function sendMessage() {
   if (!content || sendingMessage.value) return
 
   sendingMessage.value = true
+  messageSendError.value = ''
 
   try {
     const replyToId = replyingTo.value?.id || null
 
-    await sendBookClubMessage({
+    const sentMessage = await sendBookClubMessage({
       bookClubId: route.params.id,
       content,
       replyToId,
     })
+
+    upsertMessage(sentMessage)
 
     messageText.value = ''
     replyingTo.value = null
@@ -1115,7 +1044,7 @@ async function sendMessage() {
     await scrollToBottom(true)
   } catch (err) {
     console.error('Send message error:', err)
-    window.alert(err?.message || 'Unable to send message.')
+    messageSendError.value = err?.message || 'Unable to send message. Try again.'
   } finally {
     sendingMessage.value = false
   }
@@ -1431,10 +1360,6 @@ function getProfileName(profile) {
   return profile.display_name || profile.username || 'User'
 }
 
-function getInitial(profile) {
-  return getProfileName(profile).charAt(0).toUpperCase()
-}
-
 function getMessageText(message) {
   return typeof message?.content === 'string' ? message.content : ''
 }
@@ -1528,14 +1453,8 @@ async function subscribeToMessages() {
       if (!event) return
 
       if (event.type === 'insert' && event.message) {
-        const exists = messages.value.some(
-          (message) => message.id === event.message.id,
-        )
-
-        if (!exists) {
-          messages.value.push(event.message)
-          await scrollToBottom(true)
-        }
+        const inserted = upsertMessage(event.message)
+        if (inserted) await scrollToBottom(true)
       }
 
       if (event.type === 'delete' && event.message?.id) {
@@ -1555,6 +1474,21 @@ async function subscribeToMessages() {
       }
     },
   )
+}
+
+function upsertMessage(message) {
+  if (!message?.id) return false
+  const index = messages.value.findIndex((item) => item.id === message.id)
+  if (index >= 0) {
+    messages.value[index] = { ...messages.value[index], ...message }
+    return false
+  }
+  messages.value.push(message)
+  messages.value.sort((a, b) => {
+    const timeDifference = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    return timeDifference || Number(a.id) - Number(b.id)
+  })
+  return true
 }
 
 /*
@@ -2101,6 +2035,7 @@ function clearBookSearch() {
   background: color-mix(in srgb, var(--card-bg) 95%, transparent);
   backdrop-filter: blur(16px);
 }
+.message-send-error { width:min(100%,920px); margin:7px auto 0; padding:0 8px; color:#a33b30; font-size:11px; }
 
 .composer-row {
   width: min(100%, 920px);
@@ -2234,6 +2169,22 @@ function clearBookSearch() {
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 800;
+}
+
+.book-manager-message {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 11px;
+  background: var(--card-soft);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.book-manager-message.error {
+  border-color: color-mix(in srgb, #b84b40 25%, var(--border-color));
+  color: #a33b30;
 }
 
 /* Book manager */

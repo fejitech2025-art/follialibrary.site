@@ -86,49 +86,14 @@
 </template>
 
 <script setup>
+import { resolveMediaUrl } from '../utils/media'
+
 import { computed, onMounted, ref } from 'vue'
 import { Bookmark, LoaderCircle } from 'lucide-vue-next'
 import MainLayout from '../layouts/MainLayout.vue'
 import FeedItemCard from '../components/FeedItemCard.vue'
 import ResourceCard from '../components/ResourceCard.vue'
 import { getMyBookmarks } from '../services/bookmarkService'
-
-const configuredApiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL
-
-const API_BASE_URL = (
-  configuredApiUrl ||
-  (import.meta.env.DEV
-    ? 'http://127.0.0.1:8000'
-    : window.location.origin)
-)
-  .replace(/\/+$/, '')
-  .replace(/\/api$/i, '')
-
-function resolveMediaUrl(url) {
-  if (!url || typeof url !== 'string') return null
-
-  const value = url.trim()
-
-  if (!value) return null
-
-  // Keep absolute URLs and temporary local image previews unchanged.
-  if (/^(https?:\/\/|blob:|data:)/i.test(value)) {
-    return value
-  }
-
-  if (value.startsWith('//')) {
-    return `${window.location.protocol}${value}`
-  }
-
-  try {
-    // Django media paths such as /media/resource-covers/cover.jpg
-    // must resolve against the backend origin, not the Vue origin.
-    return new URL(value, `${API_BASE_URL}/`).href
-  } catch (error) {
-    console.error('Unable to resolve media URL:', error)
-    return null
-  }
-}
 
 const bookmarks = ref([])
 const loading = ref(true)

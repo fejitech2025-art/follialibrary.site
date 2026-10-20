@@ -9,8 +9,7 @@
       <template v-else-if="profile">
         <header class="profile-hero">
           <div class="profile-avatar">
-            <img v-if="profile.avatar_url || profile.avatar" :src="resolveMediaUrl(profile.avatar_url || profile.avatar)" :alt="profile.display_name || profile.username" />
-            <span v-else>{{ initial }}</span>
+            <UserAvatar :src="profile.avatar_url || profile.avatar" :alt="profile.display_name || profile.username || 'Profile picture'" :icon-size="36" />
           </div>
           <div class="profile-identity">
             <p class="eyebrow">CREATOR PROFILE</p>
@@ -19,10 +18,9 @@
             <p class="bio">{{ profile.bio || 'Sharing ideas, stories and discoveries with the Follia community.' }}</p>
             <a v-if="profile.website" class="website" :href="profile.website" target="_blank" rel="noopener noreferrer">{{ profile.website }}</a>
             <div class="profile-stats">
-              <button @click="activeTab = 'Posts'"><strong>{{ profile.post_count || posts.length }}</strong><span>Posts</span></button>
-              <button @click="activeTab = 'Resources'"><strong>{{ profile.resource_count || resources.length }}</strong><span>Resources</span></button>
-              <button @click="activeTab = 'Following'"><strong>{{ profile.following_count || 0 }}</strong><span>Following</span></button>
-              <button @click="activeTab = 'Followers'"><strong>{{ profile.follower_count || 0 }}</strong><span>Followers</span></button>
+              <button @click="activeTab = 'Followers'"><UsersRound :size="15" /><strong>{{ profile.follower_count || 0 }}</strong><span>Followers</span></button>
+              <button @click="activeTab = 'Following'"><UserRound :size="15" /><strong>{{ profile.following_count || 0 }}</strong><span>Following</span></button>
+              <span class="profile-stat"><Heart :size="15" /><strong>{{ profile.like_count || 0 }}</strong><span>Likes</span></span>
             </div>
           </div>
           <div class="profile-actions">
@@ -60,7 +58,7 @@
         <section v-else class="profile-content people-list">
           <div v-if="peopleLoading" class="profile-state small"><LoaderCircle :size="21" class="spin" /><p>Loading {{ activeTab.toLowerCase() }}…</p></div>
           <RouterLink v-for="person in people" :key="person.id" :to="{ name: 'publisher-detail', params: { id: person.id } }" class="person-row">
-            <div class="person-avatar"><img v-if="person.avatar_url || person.avatar" :src="resolveMediaUrl(person.avatar_url || person.avatar)" alt="" /><span v-else>{{ (person.display_name || person.username || 'F').charAt(0).toUpperCase() }}</span></div>
+            <div class="person-avatar"><UserAvatar :src="person.avatar_url || person.avatar" :alt="person.display_name || person.username || 'Profile picture'" :icon-size="18" /></div>
             <span><strong>{{ person.display_name || person.username }}</strong><small>@{{ person.username }}</small><p v-if="person.bio">{{ person.bio }}</p></span>
             <ArrowUpRight :size="16" />
           </RouterLink>
@@ -91,16 +89,16 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, ArrowUpRight, BookOpen, Flag, LoaderCircle, MessageCircle, Pencil, UserCheck, UserPlus, UsersRound, X } from 'lucide-vue-next'
+import { ArrowLeft, ArrowUpRight, BookOpen, Flag, Heart, LoaderCircle, MessageCircle, Pencil, UserCheck, UserPlus, UserRound, UsersRound, X } from 'lucide-vue-next'
 import MainLayout from '../layouts/MainLayout.vue'
 import FeedItemCard from '../components/FeedItemCard.vue'
 import ResourceCard from '../components/ResourceCard.vue'
+import UserAvatar from '../components/UserAvatar.vue'
 import { useAuth } from '../composables/useAuth'
 import { getPublisher, getPublisherResources } from '../services/publisherService'
 import { getPosts } from '../services/postService'
 import { getFollowers, getFollowing, followUser, unfollowUser } from '../services/followService'
 import { reportPublisher } from '../services/reportService'
-import { resolveMediaUrl } from '../utils/media'
 
 const route = useRoute()
 const router = useRouter()
@@ -123,7 +121,6 @@ const reportDescription = ref('')
 const reportError = ref('')
 const reportLoading = ref(false)
 const isOwnProfile = computed(() => String(user.value?.id || '') === String(profile.value?.id || ''))
-const initial = computed(() => (profile.value?.display_name || profile.value?.username || 'F').charAt(0).toUpperCase())
 const normalizedResources = computed(() => resources.value.map((item) => ({ ...item, cover: item.cover_url, free: item.is_free, author: item.profiles?.display_name || item.profiles?.username || 'Follia creator', authorProfile: '/profile/' + item.author_id })))
 
 async function loadProfile() {
@@ -210,7 +207,9 @@ onMounted(loadProfile)
 .bio { margin:13px 0 0; color:var(--text-secondary); font-size:13px; line-height:1.6; white-space:pre-wrap; }
 .website { display:inline-block; margin-top:7px; color:var(--text-main); font-size:11px; text-decoration:underline; text-underline-offset:3px; }
 .profile-stats { display:flex; flex-wrap:wrap; gap:19px; margin-top:18px; }
-.profile-stats button { display:flex; align-items:baseline; gap:5px; padding:0; background:transparent; }
+.profile-stats button,.profile-stat { display:flex; align-items:center; gap:6px; padding:0; background:transparent; color:var(--text-main); }
+.profile-stats button { cursor:pointer; }
+.profile-stats svg { flex:0 0 auto; color:var(--text-tertiary); }
 .profile-stats strong { font-size:13px; font-weight:750; }
 .profile-stats span { color:var(--text-secondary); font-size:11px; }
 .profile-actions { display:flex; align-items:center; gap:8px; }
@@ -252,6 +251,25 @@ onMounted(loadProfile)
 .report-error { margin:0; color:#a33b30; font-size:11px; }
 .spin { animation:spin 1s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
-@media(max-width:740px) { .profile-hero { grid-template-columns:74px minmax(0,1fr); gap:15px; padding:18px; } .profile-avatar { width:74px; height:74px; font-size:20px; } .profile-actions { grid-column:2; } .resources-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:11px; } }
-@media(max-width:380px) { .profile-hero { grid-template-columns:58px minmax(0,1fr); gap:12px; padding:14px; } .profile-avatar { width:58px; height:58px; font-size:17px; } .profile-stats { gap:12px; } .profile-stats span { font-size:10px; } .profile-actions { grid-column:1/-1; } .profile-actions > * { flex:1; } }
+@media(max-width:740px) {
+  .profile-hero { grid-template-columns:72px minmax(0,1fr); gap:14px; padding:17px; }
+  .profile-avatar { width:72px; height:72px; font-size:20px; }
+  .profile-identity h1 { font-size:clamp(21px,6vw,28px); overflow-wrap:anywhere; }
+  .profile-identity .bio { margin-top:10px; font-size:12px; }
+  .profile-actions { grid-column:1/-1; }
+  .profile-stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:15px; }
+  .profile-stats button,.profile-stat { min-width:0; flex-wrap:wrap; gap:5px; }
+  .profile-stats span { font-size:10px; }
+  .website { max-width:100%; overflow-wrap:anywhere; }
+  .resources-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:11px; }
+  .profile-tabs { gap:19px; }
+}
+@media(max-width:400px) {
+  .profile-hero { grid-template-columns:58px minmax(0,1fr); gap:12px; padding:14px; }
+  .profile-avatar { width:58px; height:58px; font-size:17px; }
+  .profile-actions { gap:7px; }
+  .profile-actions > * { flex:1; }
+  .report-button { justify-content:center; }
+  .report-button span { display:none; }
+}
 </style>

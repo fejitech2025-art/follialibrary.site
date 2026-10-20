@@ -42,14 +42,7 @@
         <!-- Profile -->
         <RouterLink to="/account" class="profile-button" aria-label="Account">
           <div class="profile-avatar">
-            <img
-              v-if="avatarUrl"
-              :src="avatarUrl"
-              alt="Profile"
-              @error="handleAvatarError"
-            />
-
-            <span v-else>{{ userInitial }}</span>
+            <UserAvatar :src="rawAvatarUrl" alt="Profile" :icon-size="20" />
           </div>
         </RouterLink>
       </div>
@@ -58,11 +51,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Search } from 'lucide-vue-next'
 
 import BrandLogo from './BrandLogo.vue'
+import UserAvatar from './UserAvatar.vue'
 import { useAuth } from '../composables/useAuth'
 import { getMyProfile } from '../services/profileService'
 
@@ -72,79 +66,6 @@ const { user: authUser, initializeAuth } = useAuth()
 const searchQuery = ref('')
 const user = ref(null)
 const profile = ref(null)
-const avatarLoadFailed = ref(false)
-
-/*
-|--------------------------------------------------------------------------
-| Django API URL
-|--------------------------------------------------------------------------
-|
-| Development:
-|   VITE_API_URL=http://127.0.0.1:8000/api
-|
-| Production:
-|   Set VITE_API_URL to your deployed Django API URL.
-|
-| We remove a trailing /api because uploaded media is served from
-| the Django backend's /media/ path, not /api/media/.
-|
-*/
-
-const configuredApiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL
-
-const API_BASE_URL = (
-  configuredApiUrl ||
-  (
-    import.meta.env.DEV
-      ? 'http://127.0.0.1:8000'
-      : window.location.origin
-  )
-)
-  .replace(/\/+$/, '')
-  .replace(/\/api$/i, '')
-
-/*
-|--------------------------------------------------------------------------
-| Resolve avatar URLs
-|--------------------------------------------------------------------------
-|
-| Handles:
-|   /media/avatars/photo.jpg
-|   media/avatars/photo.jpg
-|   https://your-backend.com/media/avatars/photo.jpg
-|
-| Absolute URLs are preserved.
-|
-*/
-
-function resolveMediaUrl(url) {
-  if (!url || typeof url !== 'string') {
-    return null
-  }
-
-  const trimmedUrl = url.trim()
-
-  if (!trimmedUrl) {
-    return null
-  }
-
-  // Keep fully qualified URLs unchanged.
-  if (/^https?:\/\//i.test(trimmedUrl)) {
-    return trimmedUrl
-  }
-
-  // Handle protocol-relative URLs.
-  if (trimmedUrl.startsWith('//')) {
-    return `${window.location.protocol}${trimmedUrl}`
-  }
-
-  try {
-    return new URL(trimmedUrl, `${API_BASE_URL}/`).href
-  } catch (error) {
-    console.error('Invalid avatar URL:', error)
-    return null
-  }
-}
 
 /*
 |--------------------------------------------------------------------------
@@ -161,34 +82,11 @@ const rawAvatarUrl = computed(() => {
   )
 })
 
-const avatarUrl = computed(() => {
-  if (avatarLoadFailed.value) {
-    return null
-  }
-
-  return resolveMediaUrl(rawAvatarUrl.value)
-})
-
-// If the user's profile or avatar changes, try loading the new image.
-watch(rawAvatarUrl, () => {
-  avatarLoadFailed.value = false
-})
-
 /*
 |--------------------------------------------------------------------------
 | Fallback initial
 |--------------------------------------------------------------------------
 */
-
-const userInitial = computed(() => {
-  const name =
-    profile.value?.display_name ||
-    profile.value?.username ||
-    user.value?.email ||
-    'F'
-
-  return String(name).charAt(0).toUpperCase()
-})
 
 /*
 |--------------------------------------------------------------------------
@@ -210,16 +108,6 @@ async function loadUser() {
   } catch (error) {
     console.error('Profile loading error:', error)
   }
-}
-
-/*
-|--------------------------------------------------------------------------
-| Avatar error fallback
-|--------------------------------------------------------------------------
-*/
-
-function handleAvatarError() {
-  avatarLoadFailed.value = true
 }
 
 /*

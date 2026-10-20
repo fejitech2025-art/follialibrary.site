@@ -2,12 +2,15 @@ from django.urls import reverse
 from rest_framework import serializers
 
 from accounts.serializers import ProfileSerializer
+from config.serializer_fields import SafeStorageFileField
+from config.storage_backends import storage_file_url
 from .models import Resource, ResourceComment
 
 
 class ResourceSerializer(serializers.ModelSerializer):
     profiles = ProfileSerializer(source="author.profile", read_only=True)
     author_id = serializers.IntegerField(read_only=True)
+    cover = SafeStorageFileField(required=False, allow_null=True)
     cover_url = serializers.SerializerMethodField()
     file_url = serializers.SerializerMethodField()
     like_count = serializers.IntegerField(source="likes.count", read_only=True)
@@ -21,8 +24,7 @@ class ResourceSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "author_id", "created_at", "cover_url", "file_url", "profiles", "like_count", "comment_count", "liked", "saved"]
 
     def get_cover_url(self, obj):
-        request = self.context.get("request")
-        return request.build_absolute_uri(obj.cover.url) if obj.cover and request else (obj.cover.url if obj.cover else "")
+        return storage_file_url(obj.cover, self.context.get("request"))
 
     def get_file_url(self, obj):
         request = self.context.get("request")
@@ -43,8 +45,30 @@ class ResourceSerializer(serializers.ModelSerializer):
 class ResourceCommentSerializer(serializers.ModelSerializer):
     profiles = ProfileSerializer(source="user.profile", read_only=True)
     user_id = serializers.IntegerField(read_only=True)
+    parent_id = serializers.IntegerField(read_only=True)
+    replies = serializers.SerializerMethodField()
 
     class Meta:
         model = ResourceComment
-        fields = ["id", "user_id", "resource_id", "content", "created_at", "profiles"]
-        read_only_fields = ["id", "user_id", "resource_id", "created_at", "profiles"]
+        fields = ["id", "user_id", "resource_id", "parent_id", "content", "created_at", "profiles", "replies"]
+        read_only_fields = ["id", "user_id", "resource_id", "parent_id", "created_at", "profiles", "replies"]
+
+    def validate_content(self, value):
+        content = value.strip()
+        if not content:
+            raise serializers.ValidationError("Comment cannot be empty.")
+        return content
+
+    def get_replies(self, obj):
+        replies = obj.replies.select_related("user__profile").order_by("created_at")[:100]
+        return ResourceCommentReplySerializer(replies, many=True, context=self.context).data
+
+
+class ResourceCommentReplySerializer(serializers.ModelSerializer):
+    profiles = ProfileSerializer(source="user.profile", read_only=True)
+    user_id = serializers.IntegerField(read_only=True)
+    parent_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = ResourceComment
+        fields = ["id", "user_id", "resource_id", "parent_id", "content", "created_at", "profiles"]

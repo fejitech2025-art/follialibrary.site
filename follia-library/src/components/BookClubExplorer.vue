@@ -239,6 +239,8 @@
 </template>
 
 <script setup>
+import { resolveMediaUrl } from '../utils/media'
+
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -270,71 +272,6 @@ const creating = ref(false)
 const avatarInput = ref(null)
 const avatarFile = ref(null)
 const avatarPreview = ref(null)
-
-/*
- * Set VITE_API_URL in your Vue environment.
- *
- * Example development value:
- * VITE_API_URL=http://127.0.0.1:8000/api
- *
- * Production should use your deployed Django API URL.
- */
-const configuredApiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL
-
-const API_BASE_URL = (
-  configuredApiUrl ||
-  (
-    import.meta.env.DEV
-      ? 'http://127.0.0.1:8000'
-      : window.location.origin
-  )
-)
-  .replace(/\/+$/, '')
-  .replace(/\/api$/i, '')
-
-const form = ref({
-  name: '',
-  description: '',
-})
-
-let searchTimer = null
-
-// Track images that failed so the card can display its initial instead.
-const failedClubAvatars = ref(new Set())
-
-function resolveMediaUrl(url) {
-  if (!url || typeof url !== 'string') {
-    return null
-  }
-
-  const value = url.trim()
-
-  if (!value) {
-    return null
-  }
-
-  // Keep absolute URLs and local upload previews unchanged.
-  if (
-    /^https?:\/\//i.test(value) ||
-    value.startsWith('blob:') ||
-    value.startsWith('data:')
-  ) {
-    return value
-  }
-
-  // Support protocol-relative URLs.
-  if (value.startsWith('//')) {
-    return `${window.location.protocol}${value}`
-  }
-
-  try {
-    // Relative media URLs should resolve against Django, not Vue.
-    return new URL(value, `${API_BASE_URL}/`).href
-  } catch (err) {
-    console.error('Invalid club avatar URL:', err)
-    return null
-  }
-}
 
 function getClubAvatarUrl(club) {
   if (failedClubAvatars.value.has(club.id)) {

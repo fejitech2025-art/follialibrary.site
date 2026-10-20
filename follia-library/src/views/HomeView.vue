@@ -12,7 +12,7 @@
         </header>
 
         <button class="quick-compose" @click="router.push('/create')">
-          <div class="compose-avatar">{{ initial }}</div>
+          <div class="compose-avatar"><UserAvatar :src="profile?.avatar_url || profile?.avatar" alt="Your profile picture" :icon-size="18" /></div>
           <span>What have you discovered lately?</span>
           <Plus :size="20" />
         </button>
@@ -58,12 +58,7 @@
           <div v-for="person in creators" :key="person.id" class="creator-suggestion">
             <RouterLink :to="{ name: 'publisher-detail', params: { id: person.id } }" class="suggested-person">
               <div class="suggested-avatar">
-                <img
-                  v-if="person.avatar_url || person.avatar"
-                  :src="resolveMediaUrl(person.avatar_url || person.avatar)"
-                  alt=""
-                />
-                <span v-else>{{ (person.display_name || person.username || 'F').charAt(0).toUpperCase() }}</span>
+                <UserAvatar :src="person.avatar_url || person.avatar" :alt="person.display_name || person.username || 'Profile picture'" :icon-size="17" />
               </div>
               <span><strong>{{ person.display_name || person.username }}</strong><small>@{{ person.username }}</small></span>
             </RouterLink>
@@ -85,17 +80,17 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowDown, ArrowUpRight, BookOpen, Compass, Plus, Sparkles } from 'lucide-vue-next'
 import MainLayout from '../layouts/MainLayout.vue'
 import FeedItemCard from '../components/FeedItemCard.vue'
+import UserAvatar from '../components/UserAvatar.vue'
 import { useAuth } from '../composables/useAuth'
 import { getMyProfile } from '../services/profileService'
 import { getFeed } from '../services/postService'
 import { getPublishers } from '../services/publisherService'
 import { followUser, unfollowUser } from '../services/followService'
-import { resolveMediaUrl } from '../utils/media'
 
 const router = useRouter()
 const { user, initializeAuth } = useAuth()
@@ -105,7 +100,6 @@ const creators = ref([])
 const profile = ref(null)
 const loading = ref(true)
 const error = ref('')
-const initial = computed(() => (profile.value?.display_name || profile.value?.username || user.value?.email || 'F').charAt(0).toUpperCase())
 
 async function loadFeed() {
   loading.value = true

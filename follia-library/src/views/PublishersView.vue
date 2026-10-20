@@ -87,15 +87,7 @@
           >
             <!-- Avatar -->
             <div class="publisher-avatar">
-              <img
-                v-if="publisher.avatar_url || publisher.avatar"
-                :src="resolveMediaUrl(publisher.avatar_url || publisher.avatar)"
-                :alt="publisher.display_name || publisher.username"
-              />
-
-              <span v-else>
-                {{ getInitials(publisher) }}
-              </span>
+              <UserAvatar :src="publisher.avatar_url || publisher.avatar" :alt="publisher.display_name || publisher.username || 'Profile picture'" :icon-size="22" />
             </div>
 
             <!-- Publisher information -->
@@ -128,9 +120,9 @@ import { computed, onMounted, ref } from 'vue'
 import { AlertCircle, ArrowUpRight, LoaderCircle, Search, Users } from 'lucide-vue-next'
 
 import MainLayout from '../layouts/MainLayout.vue'
+import UserAvatar from '../components/UserAvatar.vue'
 
 import { getPublishers } from '../services/publisherService'
-import { resolveMediaUrl } from '../utils/media'
 
 const publishers = ref([])
 
@@ -157,17 +149,6 @@ const filteredPublishers = computed(() => {
     return name.includes(query) || username.includes(query) || bio.includes(query)
   })
 })
-
-function getInitials(publisher) {
-  const name = publisher.display_name || publisher.username || 'P'
-
-  return name
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join('')
-}
 
 async function loadPublishers() {
   loading.value = true
