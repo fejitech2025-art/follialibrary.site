@@ -23,7 +23,8 @@ the shared media storage configured in `config/settings.py`. With the R2
 variables below set, Django uploads those files to Cloudflare R2. Without R2
 credentials, local debug mode uses `django/media/`; production media uploads
 are rejected until R2 is configured. Downloadable resource files continue to
-use the existing local file storage.
+use the existing local file storage. Videos are limited to 10 MB per file on
+regular-post create and edit endpoints.
 
 Set these variables in `django/.env` for local R2 use and in the backend
 hosting provider's environment settings for production:
@@ -120,8 +121,8 @@ The current settings use SMTP for email. Configure `EMAIL_HOST`, `EMAIL_PORT`, `
 ## Apps and models
 
 - `accounts`: Profile, Follow, Notification, PushSubscription, and profile endpoints.
-- `library`: Resource, ResourceLike, ResourceBookmark, ResourceComment.
-- `social`: Post, PostLike, PostBookmark, PostComment, ContentReport.
+- `library`: Resource, ResourceLike, ResourceBookmark, ResourceComment, ResourceCommentLike.
+- `social`: Post, PostMedia, PostLike, PostBookmark, PostComment, PostCommentLike, ContentReport.
 - `clubs`: BookClub, BookClubMembership, BookClubResource, BookClubMessage.
 
 Book Club resources are join records. Removing a `BookClubResource` link leaves the library resource untouched.
@@ -132,7 +133,8 @@ Book Club resources are join records. Removing a `BookClubResource` link leaves 
 - `/accounts/google/login/` and the Google OAuth callback handled by django-allauth
 - `/api/me/profile/`, `/api/users/`, `/api/users/<id>/`, `/api/users/<id>/follow/`, `/followers/`, `/following/`
 - `/api/feed/`, `/api/posts/`, `/api/posts/<id>/`, `/like/`, `/save/`, `/comments/`, `/report/`
-- `/api/resources/`, `/api/resources/<id>/`, `/like/`, `/save/`, `/comments/`, `/file/`, `/api/bookmarks/`
+- `/api/posts/<id>/file/` and `/api/posts/<id>/media/<media_id>/file/` for watermarked media downloads
+- `/api/resources/`, `/api/resources/<id>/`, `/like/`, `/save/`, `/comments/`, `/preview/`, `/file/`, `/report/`, `/api/bookmarks/`
 - `/api/search/?q=...`, `/api/notifications/`, `/api/notifications/unread-count/`, `/api/notifications/<id>/read/`
 - `/api/push/public-key/`, `/api/push/subscriptions/`
 - `/api/clubs/`, `/api/clubs/<id>/`, `/membership/`, `/join/`, `/messages/`, `/resources/`, `/members/<id>/`
@@ -143,6 +145,13 @@ Book Club resources are join records. Removing a `BookClubResource` link leaves 
 HTTP endpoints create, delete, and pin group messages. Django Channels broadcasts those changes to the authenticated club's WebSocket group. The development channel layer is in memory, which keeps local setup small and is suitable for one Django process. Use a shared channel layer before running multiple app processes in production.
 
 ## Checks and migrations
+
+Set `FRONTEND_URL` to the deployed Follia Library website origin. Watermark links use
+`FOLLIA_PUBLIC_URL` when set and otherwise use `FRONTEND_URL`. Install the Python
+dependencies in `requirements.txt` for image and PDF watermarking. Video downloads
+also require FFmpeg on the Django host; set `FFMPEG_BINARY` if its executable is not
+on `PATH`. Video watermarking runs when a download is requested and uses temporary
+files that are removed after the response finishes.
 
 ```powershell
 python manage.py check

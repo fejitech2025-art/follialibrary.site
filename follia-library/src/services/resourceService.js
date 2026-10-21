@@ -1,4 +1,4 @@
-import { api } from './api'
+import { api, apiBaseUrl } from './api'
 
 export async function uploadResourceFile(file, resourceId) {
   const form = new FormData()
@@ -33,6 +33,10 @@ export async function getPublishedResources(filters = {}) {
 
 export async function getResource(resourceId) {
   return api('/api/resources/' + resourceId + '/')
+}
+
+export function getResourcePreviewUrl(resourceId) {
+  return apiBaseUrl() + '/api/resources/' + resourceId + '/preview/'
 }
 
 export async function createResourceSignedUrl(fileUrl) {

@@ -5,7 +5,7 @@
         <header class="feed-intro">
           <div>
             <p class="feed-kicker">FOLLIA · DISCOVER ANYTHING</p>
-            <h1>Sell your self, tell your <span>story.</span></h1>
+           
             <p class="feed-description">Ideas, stories, people and resources worth passing along.</p>
           </div>
           <RouterLink to="/explore" class="explore-link">Explore <ArrowUpRight :size="16" /></RouterLink>
@@ -32,7 +32,22 @@
           <button @click="loadFeed">Try again</button>
         </div>
         <div v-else-if="feed.length" class="feed-list">
-          <FeedItemCard v-for="item in feed" :key="item.kind + '-' + item.id" :item="item" />
+          <template v-for="(item, index) in feed" :key="item.kind + '-' + item.id">
+            <FeedItemCard :item="item" />
+            <section v-if="(index + 1) % 8 === 0 && suggestionProfiles.length" class="feed-suggestions">
+              <div class="suggestions-heading"><div><p>MEET SOMEONE NEW</p><h2>People to know</h2></div><span>Scroll to explore</span></div>
+              <div class="suggestions-track">
+                <article v-for="person in suggestionSetFor(index)" :key="person.user_id || person.id" class="suggestion-card">
+                  <RouterLink :to="{ name: 'publisher-detail', params: { id: person.user_id || person.id } }" class="suggested-person">
+                    <div class="suggested-avatar"><UserAvatar :src="person.avatar_url || person.avatar" :alt="person.display_name || person.username || 'Profile picture'" :icon-size="20" /></div>
+                    <span><strong>{{ person.display_name || person.username }}</strong><small>@{{ person.username }}</small></span>
+                  </RouterLink>
+                  <p class="suggestion-bio">{{ person.bio || 'A new voice in the Follia community.' }}</p>
+                  <button :class="{ following: person.is_following }" @click="toggleSuggestedFollow(person)">{{ person.is_following ? 'Following' : 'Follow' }}</button>
+                </article>
+              </div>
+            </section>
+          </template>
           <button class="load-more" @click="router.push('/explore')">Keep discovering <ArrowDown :size="16" /></button>
         </div>
         <div v-else class="empty-feed">
@@ -89,7 +104,7 @@ import UserAvatar from '../components/UserAvatar.vue'
 import { useAuth } from '../composables/useAuth'
 import { getMyProfile } from '../services/profileService'
 import { getFeed } from '../services/postService'
-import { getPublishers } from '../services/publisherService'
+import { getSuggestedProfiles } from '../services/postService'
 import { followUser, unfollowUser } from '../services/followService'
 
 const router = useRouter()
@@ -97,6 +112,7 @@ const { user, initializeAuth } = useAuth()
 const activeTab = ref('for-you')
 const feed = ref([])
 const creators = ref([])
+const suggestionProfiles = ref([])
 const profile = ref(null)
 const loading = ref(true)
 const error = ref('')
@@ -121,16 +137,34 @@ async function selectTab(tab) {
 
 async function loadCreators() {
   try {
-    const people = await getPublishers()
-    creators.value = people.filter((person) => String(person.id) !== String(user.value?.id)).slice(0, 4)
+    const people = await getSuggestedProfiles()
+    const currentUserId = String(user.value?.id || '')
+    const eligible = people.filter((person) => String(person.user_id || person.id) !== currentUserId)
+    const seenKey = 'follia:suggested-profiles:v1'
+    let seen = new Set()
+    try { seen = new Set(JSON.parse(sessionStorage.getItem(seenKey) || '[]').map(String)) } catch {}
+    let fresh = eligible.filter((person) => !seen.has(String(person.user_id || person.id)))
+    if (!fresh.length) { seen.clear(); fresh = eligible }
+    suggestionProfiles.value = fresh
+    creators.value = fresh.slice(0, 4)
+    for (const person of fresh) seen.add(String(person.user_id || person.id))
+    sessionStorage.setItem(seenKey, JSON.stringify([...seen].slice(-120)))
   } catch {}
+}
+
+function suggestionSetFor(index) {
+  const profiles = suggestionProfiles.value
+  if (!profiles.length) return []
+  const start = (Math.floor((index + 1) / 8) * 4) % profiles.length
+  return Array.from({ length: Math.min(8, profiles.length) }, (_, offset) => profiles[(start + offset) % profiles.length])
 }
 
 async function toggleSuggestedFollow(person) {
   const before = person.is_following
   person.is_following = !before
+  const userId = person.user_id || person.id
   try {
-    await (before ? unfollowUser(person.id) : followUser(person.id))
+    await (before ? unfollowUser(userId) : followUser(userId))
   } catch (err) {
     person.is_following = before
   }
@@ -161,6 +195,18 @@ onMounted(async () => {
 .feed-tabs button.active { color:var(--text-main); }
 .feed-tabs button.active::after { content:''; position:absolute; left:18px; right:18px; bottom:-1px; height:2px; border-radius:2px; background:var(--text-main); }
 .feed-list { display:grid; gap:13px; }
+.feed-suggestions { min-width:0; padding:16px; border:1px solid var(--border-color); border-radius:18px; background:var(--card-bg); }
+.suggestions-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.suggestions-heading p { margin:0 0 4px; color:var(--text-tertiary); font-size:9px; font-weight:750; letter-spacing:.13em; }
+.suggestions-heading h2 { margin:0; font:750 17px Manrope,sans-serif; }
+.suggestions-heading > span { color:var(--text-tertiary); font-size:10px; }
+.suggestions-track { display:flex; gap:9px; overflow-x:auto; padding-bottom:3px; scroll-snap-type:x mandatory; scrollbar-width:thin; }
+.suggestion-card { flex:0 0 min(210px,75vw); display:grid; align-content:start; gap:10px; min-height:143px; padding:12px; border:1px solid var(--border-soft); border-radius:14px; background:var(--card-soft); scroll-snap-align:start; }
+.suggestion-card .suggested-person { gap:9px; }
+.suggestion-card .suggested-person strong { max-width:145px; }
+.suggestion-bio { min-height:30px; margin:0; color:var(--text-secondary); font-size:10px; line-height:1.5; }
+.suggestion-card > button { justify-self:start; min-height:29px; padding:0 11px; border-radius:999px; background:var(--text-main); color:var(--card-bg); font-size:10px; font-weight:700; }
+.suggestion-card > button.following { border:1px solid var(--border-color); background:transparent; color:var(--text-secondary); }
 .load-more { display:flex; align-items:center; justify-content:center; gap:8px; min-height:45px; border:1px solid var(--border-color); border-radius:14px; background:var(--card-bg); color:var(--text-secondary); font-size:12px; font-weight:650; }
 .empty-feed { display:flex; flex-direction:column; align-items:center; margin-top:12px; padding:50px 28px; border:1px dashed var(--border-color); border-radius:20px; background:var(--card-bg); text-align:center; }
 .empty-mark { width:48px; height:48px; display:grid; place-items:center; border-radius:15px; background:var(--icon-bg); color:var(--text-secondary); }

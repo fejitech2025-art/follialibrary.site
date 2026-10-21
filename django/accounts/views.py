@@ -8,6 +8,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import IntegrityError
+from django.db.models import Subquery
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.utils.text import slugify
@@ -179,6 +180,15 @@ def my_profile(request):
 def users(request):
     query = request.query_params.get("q", "").strip()
     profiles = Profile.objects.select_related("user").all()
+    if request.query_params.get("suggested") == "1":
+        import random
+
+        if request.user.is_authenticated:
+            followed_ids = Follow.objects.filter(follower=request.user).values("following_id")
+            profiles = profiles.exclude(user=request.user).exclude(user_id__in=Subquery(followed_ids))
+        candidates = list(profiles.order_by("-created_at")[:60])
+        random.shuffle(candidates)
+        return Response(ProfileSerializer(candidates[:12], many=True, context={"request": request}).data)
     if query:
         from django.db.models import Q
         profiles = profiles.filter(Q(username__icontains=query) | Q(display_name__icontains=query) | Q(bio__icontains=query))

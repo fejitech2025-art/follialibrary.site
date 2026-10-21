@@ -14,11 +14,12 @@ export async function getPost(postId) {
 }
 
 export async function createPost({ body = '', media = null, media_type = '' }) {
-  if (media) {
+  const mediaFiles = Array.isArray(media) ? media : media ? [media] : []
+  if (mediaFiles.length) {
     const form = new FormData()
     form.append('body', body)
-    form.append('media', media)
-    form.append('media_type', media_type || (media.type.startsWith('video/') ? 'video' : 'image'))
+    for (const file of mediaFiles) form.append('media', file)
+    form.append('media_type', media_type || (mediaFiles[0].type.startsWith('video/') ? 'video' : 'image'))
     return api('/api/posts/', { method: 'POST', body: form })
   }
   return api('/api/posts/', { method: 'POST', body: { body } })
@@ -42,6 +43,14 @@ export async function togglePostSave(postId, saved) {
 
 export async function getPostComments(postId) {
   return api('/api/posts/' + postId + '/comments/')
+}
+
+export async function togglePostCommentLike(postId, commentId, liked) {
+  return api(`/api/posts/${postId}/comments/${commentId}/like/`, { method: liked ? 'DELETE' : 'POST' })
+}
+
+export async function getSuggestedProfiles() {
+  return api('/api/users/?suggested=1')
 }
 
 export async function addPostComment(postId, content, parentId = null) {

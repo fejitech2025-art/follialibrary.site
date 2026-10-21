@@ -1,5 +1,6 @@
 from django.db.models import Q
 from django.http import FileResponse
+import mimetypes
 from rest_framework import status
 from rest_framework.decorators import api_view, parser_classes, permission_classes
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -8,8 +9,9 @@ from rest_framework.response import Response
 
 from accounts.models import notify
 from config.storage_backends import media_storage_available_for_upload
-from .models import Resource, ResourceBookmark, ResourceComment, ResourceLike
+from .models import Resource, ResourceBookmark, ResourceComment, ResourceCommentLike, ResourceLike
 from .serializers import ResourceCommentSerializer, ResourceSerializer
+from config.watermark import WatermarkProcessingError, watermarked_download
 
 
 def find_resource(resource_id, request):
@@ -171,6 +173,32 @@ def resource_comments(request, resource_id):
     return Response(ResourceCommentSerializer(comment, context={"request": request}).data, status=201)
 
 
+@api_view(["POST", "DELETE"])
+@permission_classes([IsAuthenticated])
+def resource_comment_like(request, resource_id, comment_id):
+    comment = ResourceComment.objects.select_related("user", "resource").filter(
+        pk=comment_id, resource_id=resource_id, resource__status="published"
+    ).first()
+    if not comment:
+        return Response({"detail": "Comment not found."}, status=404)
+    if request.method == "POST":
+        like, created = ResourceCommentLike.objects.get_or_create(user=request.user, comment=comment)
+        if created:
+            notify(
+                comment.user,
+                request.user,
+                "comment_like",
+                resource_id=resource_id,
+                comment_id=comment.pk,
+                event_key=f"resource-comment-like:{comment.pk}:{request.user.pk}",
+            )
+        liked = True
+    else:
+        ResourceCommentLike.objects.filter(user=request.user, comment=comment).delete()
+        liked = False
+    return Response({"liked": liked, "count": comment.likes.count()})
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def bookmarks(request):
@@ -187,4 +215,32 @@ def resource_file(request, resource_id):
         return Response({"detail": "Resource file not found."}, status=404)
     if not resource.is_free and (not request.user.is_authenticated or request.user != resource.author):
         return Response({"detail": "This resource is not available for free download."}, status=403)
-    return FileResponse(resource.file.open("rb"), as_attachment=True, filename=resource.file_name or resource.file.name.rsplit("/", 1)[-1])
+    filename = resource.file_name or resource.file.name.rsplit("/", 1)[-1]
+    try:
+        return watermarked_download(resource.file, filename, resource.author.profile.username, resource.file_type)
+    except WatermarkProcessingError as error:
+        return Response({"detail": str(error)}, status=503)
+    except Exception:
+        return Response({"detail": "This resource could not be prepared for download."}, status=422)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def resource_preview(request, resource_id):
+    resource = find_resource(resource_id, request)
+    if not resource or not resource.file:
+        return Response({"detail": "Resource preview not found."}, status=404)
+    if not resource.is_free and (not request.user.is_authenticated or request.user != resource.author):
+        return Response({"detail": "This resource is not available for preview."}, status=403)
+    filename = resource.file_name or resource.file.name.rsplit("/", 1)[-1]
+    content_type = (resource.file_type or mimetypes.guess_type(filename)[0] or "").split(";", 1)[0].lower()
+    if content_type == "application/octet-stream":
+        content_type = mimetypes.guess_type(filename)[0] or content_type
+    if content_type not in {"application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif"}:
+        return Response({"detail": "Preview is not available for this file type."}, status=415)
+    response = FileResponse(resource.file.open("rb"), as_attachment=False, filename=filename, content_type=content_type)
+    response["X-Content-Type-Options"] = "nosniff"
+    # PDF and image previews are embedded by the separate Vue frontend origin.
+    # This file-only response has no interactive page to clickjack.
+    response.xframe_options_exempt = True
+    return response

@@ -130,6 +130,7 @@ export function getNotificationMessage(notification) {
     case 'like': return actor + ' liked your post.'
     case 'comment': return actor + ' commented on your content.'
     case 'comment_reply': return actor + ' replied to your comment.'
+    case 'comment_like': return actor + ' liked your comment on ' + (notification?.resource_id ? 'a resource.' : 'a post.')
     case 'book_club_join': return actor + ' joined your Book Club.'
     case 'book_club_reply': return actor + ' replied to your message.'
     case 'book_club_admin': return actor + ' updated your Book Club role.'
@@ -142,6 +143,7 @@ export function getNotificationTypeLabel(type) {
   if (type === 'like') return 'Like'
   if (type === 'comment') return 'Comment'
   if (type === 'comment_reply') return 'Reply'
+  if (type === 'comment_like') return 'Comment like'
   if (type?.startsWith('book_club')) return 'Book Club'
   return 'Notification'
 }

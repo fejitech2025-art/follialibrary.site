@@ -85,6 +85,30 @@ class FollowNotificationTests(TestCase):
         self.assertEqual(Follow.objects.filter(follower=reader, following=followed).count(), 1)
 
 
+class DynamicProfileSuggestionTests(TestCase):
+    def test_suggestions_exclude_self_and_followed_users_and_pick_up_new_profiles(self):
+        reader = User.objects.create_user(username="suggest-reader")
+        followed = User.objects.create_user(username="suggest-followed")
+        candidate = User.objects.create_user(username="suggest-candidate")
+        for user in (reader, followed, candidate):
+            Profile.objects.update_or_create(user=user, defaults={"username": user.username})
+        Follow.objects.create(follower=reader, following=followed)
+        client = APIClient()
+        client.force_authenticate(reader)
+
+        first = client.get("/api/users/?suggested=1")
+        ids = {item["user_id"] for item in first.data}
+        self.assertIn(candidate.pk, ids)
+        self.assertNotIn(reader.pk, ids)
+        self.assertNotIn(followed.pk, ids)
+
+        new_user = User.objects.create_user(username="suggest-new")
+        Profile.objects.update_or_create(user=new_user, defaults={"username": new_user.username})
+        refreshed = client.get("/api/users/?suggested=1")
+        self.assertIn(new_user.pk, {item["user_id"] for item in refreshed.data})
+        self.assertLessEqual(len(refreshed.data), 12)
+
+
 class GoogleOnlyAuthenticationConfigurationTests(TestCase):
     def test_google_login_is_the_only_social_flow_and_callback_is_registered(self):
         google = settings.SOCIALACCOUNT_PROVIDERS["google"]

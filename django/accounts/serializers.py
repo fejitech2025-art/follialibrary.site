@@ -7,6 +7,7 @@ from .models import Follow, Notification, Profile
 
 
 class ProfileSerializer(serializers.ModelSerializer):
+    user_id = serializers.IntegerField(read_only=True)
     id = serializers.IntegerField(source="user_id", read_only=True)
     avatar = SafeStorageFileField(required=False, allow_null=True)
     avatar_url = serializers.SerializerMethodField()
@@ -19,7 +20,7 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Profile
-        fields = ["id", "username", "display_name", "avatar_url", "avatar", "bio", "location", "website", "follower_count", "following_count", "like_count", "resource_count", "post_count", "is_following"]
+        fields = ["id", "user_id", "username", "display_name", "avatar_url", "avatar", "bio", "location", "website", "follower_count", "following_count", "like_count", "resource_count", "post_count", "is_following"]
         read_only_fields = ["id", "follower_count", "following_count", "like_count", "resource_count", "post_count", "is_following"]
 
     def get_avatar_url(self, obj):
@@ -54,7 +55,7 @@ class NotificationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Notification
-        fields = ["id", "actor", "actor_id", "type", "post_id", "resource_id", "book_club_id", "read", "created_at"]
+        fields = ["id", "actor", "actor_id", "type", "post_id", "resource_id", "comment_id", "book_club_id", "read", "created_at"]
 
     def get_actor(self, obj):
         return ProfileSerializer(obj.actor.profile, context=self.context).data

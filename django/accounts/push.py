@@ -14,6 +14,7 @@ def notification_message(notification):
         "like": f"{actor} liked your post.",
         "comment": f"{actor} commented on your content.",
         "comment_reply": f"{actor} replied to your comment.",
+        "comment_like": f"{actor} liked your comment.",
         "book_club_join": f"{actor} joined your Book Club.",
         "book_club_reply": f"{actor} replied in your Book Club.",
         "book_club_admin": f"{actor} updated your Book Club role.",
@@ -37,11 +38,16 @@ def send_notification_push(notification_id):
     if not notification:
         return
 
+    target_url = f"{settings.FRONTEND_URL}/notifications"
+    if notification.post_id and notification.comment_id:
+        target_url = f"{settings.FRONTEND_URL}/post/{notification.post_id}?comment={notification.comment_id}"
+    elif notification.resource_id and notification.comment_id:
+        target_url = f"{settings.FRONTEND_URL}/resource/{notification.resource_id}?comment={notification.comment_id}"
     payload = json.dumps({
         "id": notification.pk,
         "title": "Follia Library",
         "body": notification_message(notification),
-        "url": f"{settings.FRONTEND_URL}/notifications",
+        "url": target_url,
     })
 
     subscriptions = PushSubscription.objects.filter(user_id=notification.recipient_id)

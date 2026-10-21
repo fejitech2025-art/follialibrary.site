@@ -142,7 +142,7 @@
             <!-- Resource hint -->
             <p
               v-else-if="
-                (notification.type === 'like' || notification.type === 'comment' || notification.type === 'comment_reply') &&
+                (notification.type === 'like' || notification.type === 'comment' || notification.type === 'comment_reply' || notification.type === 'comment_like') &&
                 notification.resource_id
               "
               class="notification-hint"
@@ -493,13 +493,13 @@ async function handleNotificationClick(notification) {
     return
   }
 
-  if ((notification.type === 'like' || notification.type === 'comment' || notification.type === 'comment_reply') && notification.post_id) {
-    router.push({ name: 'post-detail', params: { id: notification.post_id } })
+  if ((notification.type === 'like' || notification.type === 'comment' || notification.type === 'comment_reply' || notification.type === 'comment_like') && notification.post_id) {
+    router.push({ name: 'post-detail', params: { id: notification.post_id }, query: notification.comment_id ? { comment: notification.comment_id } : {} })
     return
   }
 
-  if ((notification.type === 'like' || notification.type === 'comment' || notification.type === 'comment_reply') && notification.resource_id) {
-    router.push({ name: 'resource-detail', params: { id: notification.resource_id } })
+  if ((notification.type === 'like' || notification.type === 'comment' || notification.type === 'comment_reply' || notification.type === 'comment_like') && notification.resource_id) {
+    router.push({ name: 'resource-detail', params: { id: notification.resource_id }, query: notification.comment_id ? { comment: notification.comment_id } : {} })
     return
   }
 }

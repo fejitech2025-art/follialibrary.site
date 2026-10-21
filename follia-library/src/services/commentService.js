@@ -21,3 +21,7 @@ export async function getResourceCommentCount(resourceId) {
   const resource = await api('/api/resources/' + resourceId + '/')
   return resource.comment_count || 0
 }
+
+export async function toggleResourceCommentLike(resourceId, commentId, liked) {
+  return api(`/api/resources/${resourceId}/comments/${commentId}/like/`, { method: liked ? 'DELETE' : 'POST' })
+}

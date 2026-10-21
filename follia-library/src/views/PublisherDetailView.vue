@@ -32,7 +32,7 @@
                 <UserPlus v-else :size="16" />
                 {{ following ? 'Following' : 'Follow' }}
               </button>
-              <button class="report-button" aria-label="Report profile" @click="showReport = true"><Flag :size="16" /><span>Report</span></button>
+              <button class="report-button" aria-label="Report profile" @click="openReport"><Flag :size="16" /><span>Report</span></button>
             </template>
           </div>
         </header>
@@ -40,6 +40,8 @@
         <div class="profile-tabs" role="tablist" aria-label="Profile content">
           <button v-for="tab in ['Posts','Resources','Followers','Following']" :key="tab" :class="{ active: activeTab === tab }" @click="activeTab = tab">{{ tab }}</button>
         </div>
+
+        <p v-if="reportSuccess" class="report-success" role="status">{{ reportSuccess }}</p>
 
         <section v-if="activeTab === 'Posts'" class="profile-content">
           <div v-if="postsLoading" class="profile-state small"><LoaderCircle :size="21" class="spin" /><p>Loading posts…</p></div>
@@ -73,7 +75,7 @@
             <p class="eyebrow">HELP KEEP FOLLIA SAFE</p><h2>Report this profile</h2>
             <label for="reason">Reason</label>
             <select id="reason" v-model="reportReason" required>
-              <option value="" disabled>Select a reason</option><option value="spam">Spam</option><option value="impersonation">Impersonation</option><option value="harassment">Harassment</option><option value="inappropriate_content">Inappropriate content</option><option value="copyright">Copyright issue</option><option value="other">Other</option>
+              <option value="" disabled>Select a reason</option><option value="spam">Spam</option><option value="impersonation">Impersonation</option><option value="harassment">Harassment</option><option value="inappropriate">Inappropriate content</option><option value="other">Other</option>
             </select>
             <label for="details">More details <span>Optional</span></label>
             <textarea id="details" v-model="reportDescription" rows="4" maxlength="500"></textarea>
@@ -120,7 +122,8 @@ const reportReason = ref('')
 const reportDescription = ref('')
 const reportError = ref('')
 const reportLoading = ref(false)
-const isOwnProfile = computed(() => String(user.value?.id || '') === String(profile.value?.id || ''))
+const reportSuccess = ref('')
+const isOwnProfile = computed(() => String(user.value?.id || '') === String(profile.value?.user_id || profile.value?.id || ''))
 const normalizedResources = computed(() => resources.value.map((item) => ({ ...item, cover: item.cover_url, free: item.is_free, author: item.profiles?.display_name || item.profiles?.username || 'Follia creator', authorProfile: '/profile/' + item.author_id })))
 
 async function loadProfile() {
@@ -164,7 +167,8 @@ async function toggleFollow() {
   const before = following.value
   following.value = !before
   try {
-    await (before ? unfollowUser(profile.value.id) : followUser(profile.value.id))
+    const profileUserId = profile.value.user_id || profile.value.id
+    await (before ? unfollowUser(profileUserId) : followUser(profileUserId))
     profile.value.follower_count = Math.max(0, (profile.value.follower_count || 0) + (before ? -1 : 1))
   } catch (err) {
     following.value = before
@@ -174,14 +178,23 @@ async function toggleFollow() {
   }
 }
 
+function openReport() {
+  reportError.value = ''
+  reportSuccess.value = ''
+  reportReason.value = ''
+  reportDescription.value = ''
+  showReport.value = true
+}
+
 async function submitReport() {
   reportLoading.value = true
   reportError.value = ''
   try {
-    await reportPublisher({ reportedUserId: profile.value.id, reason: reportReason.value, description: reportDescription.value })
+    const result = await reportPublisher({ reportedUserId: profile.value.user_id || profile.value.id, reason: reportReason.value, description: reportDescription.value })
     showReport.value = false
     reportReason.value = ''
     reportDescription.value = ''
+    reportSuccess.value = result?.duplicate ? 'You have already reported this profile.' : 'Thanks. Your report was sent.'
   } catch (err) {
     reportError.value = err.message || 'Unable to submit your report.'
   } finally {
@@ -196,6 +209,7 @@ onMounted(loadProfile)
 
 <style scoped>
 .profile-page { max-width:900px; margin:0 auto; padding-bottom:35px; }
+.report-success { margin:12px 0; padding:10px 13px; border:1px solid var(--border-color); border-radius:10px; background:var(--card-bg); color:var(--text-secondary); font-size:11px; }
 .back-link { display:inline-flex; align-items:center; gap:7px; margin:2px 0 18px; background:transparent; color:var(--text-secondary); font-size:12px; font-weight:650; }
 .profile-hero { display:grid; grid-template-columns:106px minmax(0,1fr) auto; align-items:start; gap:22px; padding:24px; border:1px solid var(--border-color); border-radius:22px; background:var(--card-bg); }
 .profile-avatar { width:106px; height:106px; display:grid; place-items:center; overflow:hidden; border-radius:50%; background:var(--icon-bg); font-size:27px; font-weight:750; }

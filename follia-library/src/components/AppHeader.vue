@@ -11,7 +11,7 @@
         </div>
       </RouterLink>
 
-      <!-- Search -->
+      <!-- Search 
       <form class="header-search" @submit.prevent="performSearch">
         <Search :size="19" />
 
@@ -36,7 +36,9 @@
           /
         </button>
       </form>
+    -->
 
+    
       <!-- Header Actions -->
       <div class="header-actions">
         <!-- Profile -->

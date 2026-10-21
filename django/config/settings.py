@@ -248,6 +248,8 @@ FRONTEND_URL = os.getenv(
     "FRONTEND_URL",
 ) or "http://localhost:5173"
 FRONTEND_URL = FRONTEND_URL.rstrip("/")
+FOLLIA_PUBLIC_URL = (os.getenv("FOLLIA_PUBLIC_URL", "").strip() or FRONTEND_URL).rstrip("/")
+FFMPEG_BINARY = os.getenv("FFMPEG_BINARY", "ffmpeg").strip() or "ffmpeg"
 
 LOGIN_REDIRECT_URL = FRONTEND_URL + "/"
 

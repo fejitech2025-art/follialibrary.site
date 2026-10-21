@@ -11,6 +11,7 @@ class ResourceSerializer(serializers.ModelSerializer):
     profiles = ProfileSerializer(source="author.profile", read_only=True)
     author_id = serializers.IntegerField(read_only=True)
     cover = SafeStorageFileField(required=False, allow_null=True)
+    file = SafeStorageFileField(required=False, allow_null=True)
     cover_url = serializers.SerializerMethodField()
     file_url = serializers.SerializerMethodField()
     like_count = serializers.IntegerField(source="likes.count", read_only=True)
@@ -41,17 +42,30 @@ class ResourceSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         return bool(request and request.user.is_authenticated and obj.bookmarks.filter(user=request.user).exists())
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Keep storage URLs private; `file` and `file_url` both use the access
+        # checked, watermarked download view. Previews use the separate route.
+        data["file"] = data.get("file_url") or None
+        return data
+
 
 class ResourceCommentSerializer(serializers.ModelSerializer):
     profiles = ProfileSerializer(source="user.profile", read_only=True)
     user_id = serializers.IntegerField(read_only=True)
     parent_id = serializers.IntegerField(read_only=True)
     replies = serializers.SerializerMethodField()
+    like_count = serializers.IntegerField(source="likes.count", read_only=True)
+    liked = serializers.SerializerMethodField()
 
     class Meta:
         model = ResourceComment
-        fields = ["id", "user_id", "resource_id", "parent_id", "content", "created_at", "profiles", "replies"]
-        read_only_fields = ["id", "user_id", "resource_id", "parent_id", "created_at", "profiles", "replies"]
+        fields = ["id", "user_id", "resource_id", "parent_id", "content", "created_at", "profiles", "replies", "like_count", "liked"]
+        read_only_fields = ["id", "user_id", "resource_id", "parent_id", "created_at", "profiles", "replies", "like_count", "liked"]
+
+    def get_liked(self, obj):
+        request = self.context.get("request")
+        return bool(request and request.user.is_authenticated and obj.likes.filter(user=request.user).exists())
 
     def validate_content(self, value):
         content = value.strip()
@@ -68,7 +82,13 @@ class ResourceCommentReplySerializer(serializers.ModelSerializer):
     profiles = ProfileSerializer(source="user.profile", read_only=True)
     user_id = serializers.IntegerField(read_only=True)
     parent_id = serializers.IntegerField(read_only=True)
+    like_count = serializers.IntegerField(source="likes.count", read_only=True)
+    liked = serializers.SerializerMethodField()
 
     class Meta:
         model = ResourceComment
-        fields = ["id", "user_id", "resource_id", "parent_id", "content", "created_at", "profiles"]
+        fields = ["id", "user_id", "resource_id", "parent_id", "content", "created_at", "profiles", "like_count", "liked"]
+
+    def get_liked(self, obj):
+        request = self.context.get("request")
+        return bool(request and request.user.is_authenticated and obj.likes.filter(user=request.user).exists())

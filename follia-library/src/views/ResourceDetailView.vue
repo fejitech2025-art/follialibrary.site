@@ -51,6 +51,8 @@
               <Share2 :size="18" />
               <span>Share</span>
             </button>
+            <button type="button" class="share-button" :disabled="!resource.file_url" @click="showPreview = true"><Eye :size="17" /><span>Preview</span></button>
+            <button type="button" class="share-button" @click="openResourceReport('resource')"><Flag :size="17" /><span>Report</span></button>
           </div>
         </div>
 
@@ -88,7 +90,7 @@
               :to="{
                 name: 'publisher-detail',
                 params: {
-                  id: resource.profiles.id,
+                id: resource.profiles.user_id || resource.author_id || resource.profiles.id,
                 },
               }"
               class="detail-author"
@@ -320,6 +322,28 @@
       </div>
     </section>
 
+    <Teleport to="body">
+      <div v-if="showPreview" class="preview-overlay" @click.self="showPreview = false">
+        <section class="preview-dialog" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+          <header><div><p>RESOURCE PREVIEW</p><h2 id="preview-title">{{ resource?.title }}</h2></div><button type="button" aria-label="Close preview" @click="showPreview = false"><X :size="19" /></button></header>
+          <iframe v-if="previewKind === 'pdf'" :src="previewUrl" :title="resource?.title + ' PDF preview'" class="pdf-preview"></iframe>
+          <div v-else-if="previewKind === 'image'" class="image-preview"><img :src="previewUrl" :alt="resource?.title || 'Resource preview'" /></div>
+          <div v-else class="unsupported-preview"><FileText :size="28" /><strong>{{ resource?.file_type || 'Document' }}</strong><span>This file type cannot be previewed in the browser.</span></div>
+          <footer><span>{{ resource?.file_name || 'Resource file' }}</span><a :href="resource?.file_url" class="preview-download"><Download :size="16" /> Download</a></footer>
+        </section>
+      </div>
+      <div v-if="showResourceReport" class="report-overlay" @click.self="showResourceReport = false">
+        <form class="report-dialog" @submit.prevent="submitResourceReport">
+          <header><div><p>HELP KEEP FOLLIA SAFE</p><h2>Report {{ reportTarget?.type === 'comment' ? 'this comment' : 'this resource' }}</h2></div><button type="button" aria-label="Close" @click="showResourceReport = false"><X :size="18" /></button></header>
+          <label for="resource-report-reason">Reason</label>
+          <select id="resource-report-reason" v-model="reportReason" required><option value="" disabled>Select a reason</option><option value="spam">Spam</option><option value="harassment">Harassment</option><option value="inappropriate">Inappropriate content</option><option value="impersonation">Impersonation</option><option value="other">Other</option></select>
+          <label for="resource-report-details">More details <span>Optional</span></label><textarea id="resource-report-details" v-model="reportDescription" maxlength="500" rows="3"></textarea>
+          <p v-if="reportError" class="report-error" role="alert">{{ reportError }}</p>
+          <footer><button type="button" class="report-cancel" @click="showResourceReport = false">Cancel</button><button class="report-submit" :disabled="reportLoading || !reportReason">{{ reportLoading ? 'Sending…' : 'Send report' }}</button></footer>
+        </form>
+      </div>
+    </Teleport>
+
     <!-- Comments modal -->
     <Teleport to="body">
       <div v-if="showComments" class="comments-overlay" @click.self="closeComments">
@@ -353,7 +377,7 @@
                 :to="{
                   name: 'publisher-detail',
                   params: {
-                    id: comment.profiles.id,
+                    id: comment.profiles.user_id || comment.profiles.id,
                   },
                 }"
                 class="comment-avatar"
@@ -371,7 +395,7 @@
                     :to="{
                       name: 'publisher-detail',
                       params: {
-                        id: comment.profiles.id,
+                        id: comment.profiles.user_id || comment.profiles.id,
                       },
                     }"
                     @click.stop
@@ -387,7 +411,7 @@
                 </div>
 
                 <p>{{ comment.content }}</p>
-                <button type="button" class="reply-comment" @click="replyTo(comment)">Reply</button>
+                <div class="comment-tools"><button type="button" class="comment-like" :class="{ liked: comment.liked }" @click="toggleCommentLike(comment)"><Heart :size="13" :fill="comment.liked ? 'currentColor' : 'none'" /> {{ comment.like_count || 0 }}</button><button type="button" class="reply-comment" @click="replyTo(comment)">Reply</button><button type="button" class="reply-comment" @click="openResourceReport('comment', comment)">Report</button></div>
               </div>
             </div>
               <div v-for="reply in comment.replies || []" :key="reply.id" class="comment-reply">
@@ -395,6 +419,7 @@
                 <div class="comment-body">
                   <div class="comment-meta"><strong>{{ reply.profiles?.display_name || reply.profiles?.username || 'Follia reader' }}</strong><span>{{ formatCommentTime(reply.created_at) }}</span></div>
                   <p>{{ reply.content }}</p>
+                  <div class="comment-tools"><button type="button" class="comment-like" :class="{ liked: reply.liked }" @click="toggleCommentLike(reply)"><Heart :size="13" :fill="reply.liked ? 'currentColor' : 'none'" /> {{ reply.like_count || 0 }}</button><button type="button" class="reply-comment" @click="openResourceReport('comment', reply)">Report</button></div>
                 </div>
               </div>
             </article>
@@ -444,7 +469,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import {
@@ -454,6 +479,8 @@ import {
   Bookmark,
   Download,
   FileText,
+  Eye,
+  Flag,
   Heart,
   LoaderCircle,
   MessageCircle,
@@ -464,7 +491,7 @@ import {
 
 import MainLayout from '../layouts/MainLayout.vue'
 
-import { createResourceSignedUrl, getResource } from '../services/resourceService'
+import { createResourceSignedUrl, getResource, getResourcePreviewUrl } from '../services/resourceService'
 import { resolveMediaUrl } from '../utils/media'
 import UserAvatar from '../components/UserAvatar.vue'
 
@@ -480,7 +507,9 @@ import {
   addResourceComment,
   getResourceCommentCount,
   getResourceComments,
+  toggleResourceCommentLike,
 } from '../services/commentService'
+import { reportResource, reportResourceComment } from '../services/reportService'
 
 const route = useRoute()
 const router = useRouter()
@@ -491,6 +520,13 @@ const loading = ref(true)
 const errorMessage = ref('')
 const openingResource = ref(false)
 const toastMessage = ref('')
+const showPreview = ref(false)
+const showResourceReport = ref(false)
+const reportTarget = ref(null)
+const reportReason = ref('')
+const reportDescription = ref('')
+const reportError = ref('')
+const reportLoading = ref(false)
 
 const bookmarked = ref(false)
 const bookmarkLoading = ref(false)
@@ -509,6 +545,14 @@ const commentSubmitError = ref('')
 const showComments = ref(false)
 const newComment = ref('')
 const replyingTo = ref(null)
+const previewUrl = computed(() => resource.value?.id ? getResourcePreviewUrl(resource.value.id) : '')
+const previewKind = computed(() => {
+  const type = (resource.value?.file_type || '').toLowerCase()
+  const filename = (resource.value?.file_name || '').toLowerCase()
+  if (type.includes('pdf') || filename.endsWith('.pdf')) return 'pdf'
+  if (type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/.test(filename)) return 'image'
+  return 'unsupported'
+})
 
 onMounted(() => {
   loadResource()
@@ -689,6 +733,46 @@ async function addComment() {
     commentSubmitError.value = error?.message || 'Unable to add your comment.'
   } finally {
     commentSubmitting.value = false
+  }
+}
+
+async function toggleCommentLike(comment) {
+  const previous = Boolean(comment.liked)
+  comment.liked = !previous
+  comment.like_count = Math.max(0, Number(comment.like_count || 0) + (previous ? -1 : 1))
+  try {
+    const result = await toggleResourceCommentLike(resource.value.id, comment.id, previous)
+    comment.liked = result.liked
+    comment.like_count = result.count
+  } catch (error) {
+    comment.liked = previous
+    comment.like_count = Math.max(0, Number(comment.like_count || 0) + (previous ? 1 : -1))
+    showToast(error.message || 'Sign in to like this comment.')
+  }
+}
+
+function openResourceReport(type, comment = null) {
+  reportTarget.value = { type, comment }
+  reportReason.value = ''
+  reportDescription.value = ''
+  reportError.value = ''
+  showResourceReport.value = true
+}
+
+async function submitResourceReport() {
+  if (!resource.value || reportLoading.value) return
+  reportLoading.value = true
+  reportError.value = ''
+  try {
+    const result = reportTarget.value?.type === 'comment'
+      ? await reportResourceComment(resource.value.id, reportTarget.value.comment.id, reportReason.value, reportDescription.value.trim())
+      : await reportResource(resource.value.id, reportReason.value, reportDescription.value.trim())
+    showResourceReport.value = false
+    showToast(result?.duplicate ? 'You have already reported this item.' : 'Thanks. Your report was sent.')
+  } catch (error) {
+    reportError.value = error.message || 'Unable to send your report.'
+  } finally {
+    reportLoading.value = false
   }
 }
 
@@ -1433,6 +1517,9 @@ function formatCommentTime(dateString) {
 }
 
 .reply-comment:hover { color: var(--text-main); }
+.comment-tools { display:flex; align-items:center; gap:12px; margin-top:7px; }
+.comment-like { display:inline-flex; align-items:center; gap:4px; padding:0; background:transparent; color:var(--text-tertiary); font-size:10px; }
+.comment-like.liked { color:#9e463a; }
 
 .replying-to {
   display: flex;
@@ -1676,4 +1763,35 @@ function formatCommentTime(dateString) {
     padding: 12px;
   }
 }
+.preview-overlay,.report-overlay { position:fixed; inset:0; z-index:500; display:grid; place-items:center; padding:18px; background:rgba(14,15,17,.62); backdrop-filter:blur(5px); }
+.preview-dialog { width:min(980px,100%); height:min(86dvh,760px); display:grid; grid-template-rows:auto minmax(0,1fr) auto; overflow:hidden; border:1px solid var(--border-color); border-radius:20px; background:var(--card-bg); box-shadow:0 24px 80px rgba(0,0,0,.28); }
+.preview-dialog header,.preview-dialog footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 17px; }
+.preview-dialog header { border-bottom:1px solid var(--border-soft); }
+.preview-dialog header p { margin:0 0 4px; color:var(--text-tertiary); font-size:9px; font-weight:750; letter-spacing:.13em; }
+.preview-dialog header h2 { max-width:75vw; margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:750 16px Manrope,sans-serif; }
+.preview-dialog header > button { width:32px; height:32px; display:grid; place-items:center; border-radius:9px; background:var(--icon-bg); color:var(--text-main); }
+.preview-dialog footer { border-top:1px solid var(--border-soft); color:var(--text-tertiary); font-size:10px; }
+.preview-dialog footer > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.preview-download { display:inline-flex; align-items:center; gap:6px; flex-shrink:0; padding:8px 11px; border-radius:9px; background:var(--primary-bg); color:var(--primary-text); font-size:11px; font-weight:700; }
+.pdf-preview { width:100%; height:100%; border:0; background:#e7e9ec; }
+.image-preview { display:grid; place-items:center; overflow:auto; padding:18px; background:#e7e9ec; }
+.image-preview img { display:block; max-width:100%; max-height:100%; object-fit:contain; }
+.unsupported-preview { display:grid; align-content:center; justify-items:center; gap:10px; color:var(--text-secondary); }
+.unsupported-preview span { color:var(--text-tertiary); font-size:12px; }
+.report-dialog { width:min(430px,100%); display:grid; gap:9px; padding:21px; border:1px solid var(--border-color); border-radius:19px; background:var(--card-bg); }
+.report-dialog header,.report-dialog footer { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.report-dialog header { margin-bottom:6px; padding:0; border:0; }
+.report-dialog header p { margin:0 0 4px; color:var(--text-tertiary); font-size:9px; font-weight:750; letter-spacing:.13em; }
+.report-dialog h2 { margin:0; font:750 19px Manrope,sans-serif; }
+.report-dialog header > button { width:32px; height:32px; display:grid; place-items:center; border-radius:9px; background:var(--icon-bg); color:var(--text-main); }
+.report-dialog label { margin-top:5px; color:var(--text-secondary); font-size:11px; font-weight:700; }
+.report-dialog label span { color:var(--text-tertiary); font-weight:400; }
+.report-dialog select,.report-dialog textarea { width:100%; padding:10px 11px; border:1px solid var(--border-color); border-radius:10px; outline:0; background:var(--input-bg); color:var(--text-main); font:inherit; font-size:12px; }
+.report-dialog textarea { resize:vertical; }
+.report-dialog footer { justify-content:flex-end; margin-top:8px; padding:0; border:0; }
+.report-cancel,.report-submit { min-height:36px; padding:0 12px; border-radius:10px; font-size:11px; font-weight:700; }
+.report-cancel { border:1px solid var(--border-color); background:transparent; color:var(--text-secondary); }
+.report-submit { background:var(--primary-bg); color:var(--primary-text); }
+.report-submit:disabled { opacity:.5; }
+.report-error { margin:0; color:#a33b30; font-size:11px; }
 </style>

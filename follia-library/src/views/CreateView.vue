@@ -26,19 +26,39 @@
         </div>
         <label class="sr-only" for="post-body">Write a post</label>
         <textarea id="post-body" v-model="body" maxlength="5000" placeholder="What have you discovered lately?" rows="6"></textarea>
-        <div v-if="mediaPreview" class="media-preview">
-          <video v-if="media?.type.startsWith('video/')" :src="mediaPreview" controls playsinline />
-          <img v-else :src="mediaPreview" alt="Post preview" />
-          <button type="button" class="remove-media" aria-label="Remove media" @click="clearMedia"><X :size="16" /></button>
+        <div v-if="selectedMedia.length" class="media-preview-list">
+          <div v-for="(entry, index) in selectedMedia" :key="entry.url" class="media-preview">
+            <video v-if="entry.type === 'video'" :src="entry.url" controls playsinline />
+            <img v-else :src="entry.url" :alt="'Post image ' + (index + 1)" />
+            <button type="button" class="remove-media" :aria-label="'Remove media ' + (index + 1)" @click="removeMedia(index)"><X :size="16" /></button>
+          </div>
         </div>
+        <section v-if="videoCandidate" class="video-trim-panel">
+          <p class="video-limit">Video upload limit: <strong>10 MB per video</strong><span v-if="videoCandidate.size > 10 * 1024 * 1024"> The source is over the limit; trim it to a smaller file before sharing.</span></p>
+          <video ref="trimVideoElement" :src="candidateUrl" controls playsinline preload="metadata" @loadedmetadata="readVideoDuration" @timeupdate="stopClipPreview" />
+          <p class="duration-label">Original duration: {{ formatDuration(videoDuration) }}</p>
+          <div class="trim-fields">
+            <label>Start <input v-model.number="trimStart" type="number" min="0" :max="videoDuration" step="0.1" @change="clampTrimPoints" /> s</label>
+            <label>End <input v-model.number="trimEnd" type="number" min="0" :max="videoDuration" step="0.1" @change="clampTrimPoints" /> s</label>
+          </div>
+          <p class="duration-label">Selected duration: {{ formatDuration(Math.max(0, trimEnd - trimStart)) }}</p>
+          <p v-if="videoError" class="form-message error">{{ videoError }}</p>
+          <p v-if="videoProcessing" class="duration-label">Preparing the selected clip…</p>
+          <div class="trim-actions">
+            <button type="button" @click="previewClip">Preview selection</button>
+            <button type="button" :disabled="videoProcessing || !videoDuration || videoCandidate.size > 10 * 1024 * 1024" @click="confirmVideo(false)">Use original</button>
+            <button type="button" class="trim-confirm" :disabled="videoProcessing || !videoDuration" @click="confirmVideo(true)">{{ videoProcessing ? 'Processing…' : 'Use selected clip' }}</button>
+            <button type="button" :disabled="videoProcessing" @click="clearVideoCandidate">Remove video</button>
+          </div>
+        </section>
         <div v-if="error" class="form-message error">{{ error }}</div>
         <div class="composer-footer">
           <div class="composer-tools">
-            <label class="attach-button" for="post-media"><ImagePlus :size="19" /><span>Photo or video</span></label>
-            <input id="post-media" ref="mediaInput" type="file" accept="image/*,video/*" @change="chooseMedia" />
+            <label class="attach-button" for="post-media"><ImagePlus :size="19" /><span>Photos or video</span></label>
+            <input id="post-media" ref="mediaInput" type="file" accept="image/*,video/*" multiple @change="chooseMedia" />
             <span class="char-count">{{ body.length }}/5000</span>
           </div>
-          <button class="publish-button" type="submit" :disabled="publishing || (!body.trim() && !media)">
+          <button class="publish-button" type="submit" :disabled="publishing || videoProcessing || !!videoCandidate || (!body.trim() && !selectedMedia.length)">
             {{ publishing ? 'Sharing…' : 'Share post' }} <ArrowUpRight v-if="!publishing" :size="17" />
           </button>
         </div>
@@ -52,6 +72,7 @@
       </section>
     </section>
   </MainLayout>
+  <ImageCropper v-if="cropFile" :file="cropFile" :aspect-ratio="4 / 3" @confirm="finishCrop" @skip="finishCrop" @cancel="cancelCrop" />
 </template>
 
 <script setup>
@@ -59,6 +80,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, ArrowUpRight, BookOpen, ImagePlus, MessageCircle, X } from 'lucide-vue-next'
 import MainLayout from '../layouts/MainLayout.vue'
+import ImageCropper from '../components/ImageCropper.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import { useAuth } from '../composables/useAuth'
 import { getMyProfile } from '../services/profileService'
@@ -68,9 +90,18 @@ const router = useRouter()
 const { user, initializeAuth } = useAuth()
 const mode = ref('post')
 const body = ref('')
-const media = ref(null)
-const mediaPreview = ref('')
+const selectedMedia = ref([])
 const mediaInput = ref(null)
+const cropFile = ref(null)
+const cropQueue = ref([])
+const videoCandidate = ref(null)
+const candidateUrl = ref('')
+const trimVideoElement = ref(null)
+const videoDuration = ref(0)
+const trimStart = ref(0)
+const trimEnd = ref(0)
+const videoError = ref('')
+const videoProcessing = ref(false)
 const publishing = ref(false)
 const error = ref('')
 const profile = ref(null)
@@ -82,38 +113,154 @@ onMounted(async () => {
 })
 
 function chooseMedia(event) {
-  const file = event.target.files?.[0]
-  if (!file) return
+  const files = Array.from(event.target.files || [])
+  if (!files.length) return
   error.value = ''
-  if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
-    error.value = 'Choose an image or video file.'
-    event.target.value = ''
-    return
+  const videoFiles = files.filter((file) => file.type.startsWith('video/'))
+  const imageFiles = files.filter((file) => file.type.startsWith('image/'))
+  if (videoFiles.length + imageFiles.length !== files.length) { error.value = 'Choose image or video files.'; event.target.value = ''; return }
+  if (videoFiles.length && (videoFiles.length > 1 || imageFiles.length || selectedMedia.value.length)) { error.value = 'A post can include one video or multiple images.'; event.target.value = ''; return }
+  if (videoFiles.length) {
+    const file = videoFiles[0]
+    clearVideoCandidate()
+    videoCandidate.value = file
+    candidateUrl.value = URL.createObjectURL(file)
+    videoDuration.value = 0
+    trimStart.value = 0
+    trimEnd.value = 0
+    videoError.value = ''
+  } else {
+    if (videoCandidate.value) { error.value = 'Confirm or remove the selected video before adding images.'; event.target.value = ''; return }
+    const invalid = imageFiles.find((file) => file.size > 50 * 1024 * 1024)
+    if (invalid) { error.value = 'Images must be 50 MB or smaller.'; event.target.value = ''; return }
+    if (selectedMedia.value.some((entry) => entry.type === 'video')) { error.value = 'Remove the video before adding images.'; event.target.value = ''; return }
+    cropQueue.value.push(...imageFiles)
+    showNextCrop()
   }
-  if (file.size > 50 * 1024 * 1024) {
-    error.value = 'Choose a file smaller than 50 MB.'
-    event.target.value = ''
-    return
-  }
-  clearMedia()
-  media.value = file
-  mediaPreview.value = URL.createObjectURL(file)
-  error.value = ''
+  event.target.value = ''
 }
 
 function clearMedia() {
-  if (mediaPreview.value?.startsWith('blob:')) URL.revokeObjectURL(mediaPreview.value)
-  media.value = null
-  mediaPreview.value = ''
+  for (const entry of selectedMedia.value) URL.revokeObjectURL(entry.url)
+  selectedMedia.value = []
   if (mediaInput.value) mediaInput.value.value = ''
 }
 
+function showNextCrop() {
+  cropFile.value = cropQueue.value.shift() || null
+}
+function finishCrop(file) {
+  selectedMedia.value.push({ file, url: URL.createObjectURL(file), type: 'image' })
+  showNextCrop()
+}
+function cancelCrop() { cropQueue.value = []; cropFile.value = null }
+function removeMedia(index) {
+  const [removed] = selectedMedia.value.splice(index, 1)
+  if (removed) URL.revokeObjectURL(removed.url)
+}
+
+function readVideoDuration() {
+  const duration = Number(trimVideoElement.value?.duration || 0)
+  if (!Number.isFinite(duration) || duration <= 0) { videoError.value = 'The selected video duration could not be read.'; return }
+  videoDuration.value = duration
+  trimEnd.value = duration
+}
+function clampTrimPoints() {
+  trimStart.value = Math.max(0, Math.min(Number(trimStart.value || 0), Math.max(0, videoDuration.value - 0.1)))
+  trimEnd.value = Math.max(trimStart.value + 0.1, Math.min(Number(trimEnd.value || 0), videoDuration.value))
+}
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
+  const whole = Math.floor(seconds)
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}${Math.floor((seconds % 1) * 10) ? '.' + Math.floor((seconds % 1) * 10) : ''}`
+}
+function previewClip() {
+  clampTrimPoints()
+  const video = trimVideoElement.value
+  if (!video) return
+  video.currentTime = trimStart.value
+  video.play().catch(() => { videoError.value = 'Use the video controls to preview this selection.' })
+}
+function stopClipPreview() {
+  if (trimVideoElement.value && trimVideoElement.value.currentTime >= trimEnd.value) trimVideoElement.value.pause()
+}
+function clearVideoCandidate() {
+  if (candidateUrl.value) URL.revokeObjectURL(candidateUrl.value)
+  candidateUrl.value = ''
+  videoCandidate.value = null
+  videoDuration.value = 0
+  trimStart.value = 0
+  trimEnd.value = 0
+}
+async function confirmVideo(trim) {
+  if (!videoCandidate.value || videoProcessing.value) return
+  videoError.value = ''
+  if (!trim || (trimStart.value <= 0 && trimEnd.value >= videoDuration.value - 0.05)) {
+    if (videoCandidate.value.size > 10 * 1024 * 1024) { videoError.value = 'The original video is larger than 10 MB. Shorten the selected duration and trim the clip.'; return }
+    selectedMedia.value.push({ file: videoCandidate.value, url: candidateUrl.value, type: 'video' })
+    candidateUrl.value = ''
+    videoCandidate.value = null
+    return
+  }
+  clampTrimPoints()
+  if (trimEnd.value <= trimStart.value) { videoError.value = 'Choose an end point after the start point.'; return }
+  if (typeof MediaRecorder === 'undefined') { videoError.value = 'This browser cannot trim video here. Choose the original video or use a browser with video recording support.'; return }
+  const captureStream = HTMLMediaElement.prototype.captureStream || HTMLMediaElement.prototype.mozCaptureStream
+  if (!captureStream) { videoError.value = 'This browser cannot trim video here. Choose the original video or use a browser with video capture support.'; return }
+  const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type))
+  if (!mimeType) { videoError.value = 'This browser cannot create a trimmed video file. Choose the original video.'; return }
+  videoProcessing.value = true
+  const player = document.createElement('video')
+  player.src = candidateUrl.value
+  player.playsInline = true
+  player.preload = 'auto'
+  let recordingStream = null
+  let recordingRecorder = null
+  try {
+    await new Promise((resolve, reject) => { player.onloadedmetadata = resolve; player.onerror = () => reject(new Error('This video format cannot be decoded in the browser.')) })
+    player.currentTime = trimStart.value
+    await new Promise((resolve) => { if (Math.abs(player.currentTime - trimStart.value) < 0.05) resolve(); else player.onseeked = resolve })
+    recordingStream = captureStream.call(player)
+    const clipSeconds = trimEnd.value - trimStart.value
+    const targetAverage = (9 * 1024 * 1024 * 8) / clipSeconds
+    const videoBitrate = Math.min(2200000, Math.max(100000, Math.floor(targetAverage - 128000)))
+    recordingRecorder = new MediaRecorder(recordingStream, { mimeType, videoBitsPerSecond: videoBitrate, audioBitsPerSecond: 128000 })
+    const chunks = []
+    const output = new Promise((resolve, reject) => {
+      recordingRecorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data) }
+      recordingRecorder.onerror = () => reject(new Error('The selected video could not be trimmed.'))
+      recordingRecorder.onstop = () => resolve(new Blob(chunks, { type: mimeType.split(';')[0] }))
+    })
+    recordingRecorder.start(200)
+    const endWhenReady = () => {
+      if (player.currentTime >= trimEnd.value && recordingRecorder.state === 'recording') { player.pause(); recordingRecorder.stop() }
+      else if (recordingRecorder.state === 'recording') requestAnimationFrame(endWhenReady)
+    }
+    player.ontimeupdate = endWhenReady
+    await player.play()
+    const blob = await Promise.race([output, new Promise((_, reject) => setTimeout(() => reject(new Error('Video processing took too long.')), Math.max(30000, (trimEnd.value - trimStart.value) * 2500)))])
+    if (!blob.size) throw new Error('The selected video clip is empty.')
+    if (blob.size > 10 * 1024 * 1024) throw new Error('The trimmed video is larger than 10 MB. Shorten the clip and try again.')
+    const file = new File([blob], videoCandidate.value.name.replace(/\.[^.]+$/, '') + '-trimmed.webm', { type: blob.type, lastModified: Date.now() })
+    selectedMedia.value.push({ file, url: URL.createObjectURL(file), type: 'video' })
+    clearVideoCandidate()
+  } catch (err) {
+    videoError.value = err.message || 'Video processing failed. Choose the original video or try another format.'
+  } finally {
+    if (recordingRecorder?.state === 'recording') recordingRecorder.stop()
+    for (const track of recordingStream?.getTracks?.() || []) track.stop()
+    player.pause()
+    player.removeAttribute('src')
+    videoProcessing.value = false
+  }
+}
+
 async function publishPost() {
-  if (!body.value.trim() && !media.value) return
+  if (!body.value.trim() && !selectedMedia.value.length) return
   publishing.value = true
   error.value = ''
   try {
-    await createPost({ body: body.value.trim(), media: media.value })
+    await createPost({ body: body.value.trim(), media: selectedMedia.value.map((entry) => entry.file) })
     clearMedia()
     await router.push({ name: 'home' })
   } catch (err) {
@@ -123,7 +270,7 @@ async function publishPost() {
   }
 }
 
-onBeforeUnmount(clearMedia)
+onBeforeUnmount(() => { clearMedia(); clearVideoCandidate() })
 </script>
 
 <style scoped>
@@ -157,6 +304,19 @@ textarea::placeholder { color:var(--text-tertiary); }
 .publish-button:disabled { cursor:not-allowed; opacity:.5; }
 .media-preview { position:relative; overflow:hidden; margin:0 0 16px; border-radius:15px; background:var(--icon-bg); }
 .media-preview img,.media-preview video { display:block; width:100%; max-height:480px; object-fit:contain; }
+.media-preview-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:9px; margin:0 0 16px; }
+.media-preview-list .media-preview { margin:0; }
+.video-trim-panel { display:grid; gap:10px; margin:0 0 17px; padding:13px; border:1px solid var(--border-color); border-radius:14px; background:var(--card-soft); }
+.video-trim-panel video { display:block; width:100%; max-height:350px; border-radius:9px; background:#111; }
+.video-limit,.duration-label { margin:0; color:var(--text-secondary); font-size:11px; }
+.video-limit span { color:#a33b30; }
+.trim-fields { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.trim-fields label { display:flex; align-items:center; gap:7px; color:var(--text-secondary); font-size:11px; }
+.trim-fields input { width:100%; min-width:0; padding:8px; border:1px solid var(--border-color); border-radius:8px; background:var(--input-bg); color:var(--text-main); }
+.trim-actions { display:flex; flex-wrap:wrap; gap:7px; }
+.trim-actions button { min-height:34px; padding:0 10px; border:1px solid var(--border-color); border-radius:9px; background:var(--card-bg); color:var(--text-secondary); font-size:10px; font-weight:700; }
+.trim-actions .trim-confirm { border-color:var(--primary-bg); background:var(--primary-bg); color:var(--primary-text); }
+.trim-actions button:disabled { opacity:.5; }
 .remove-media { position:absolute; top:10px; right:10px; width:34px; height:34px; display:grid; place-items:center; border-radius:50%; background:rgba(20,20,20,.76); color:white; }
 .form-message { margin:0 0 12px; font-size:12px; }
 .form-message.error { color:#a33b30; }

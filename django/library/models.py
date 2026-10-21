@@ -63,3 +63,12 @@ class ResourceComment(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class ResourceCommentLike(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    comment = models.ForeignKey(ResourceComment, on_delete=models.CASCADE, related_name="likes")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "comment"], name="unique_resource_comment_like")]

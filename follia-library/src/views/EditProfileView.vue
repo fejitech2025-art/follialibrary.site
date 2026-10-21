@@ -293,6 +293,7 @@
         </button>
       </div>
     </div>
+    <ImageCropper v-if="cropFile" :file="cropFile" :aspect-ratio="1" @confirm="finishAvatarCrop" @skip="finishAvatarCrop" @cancel="cropFile = null" />
   </div>
 </template>
 
@@ -322,6 +323,7 @@ import {
 import { useTheme } from '../composables/useTheme'
 import { useAuth } from '../composables/useAuth'
 import UserAvatar from '../components/UserAvatar.vue'
+import ImageCropper from '../components/ImageCropper.vue'
 
 import {
   getCurrentUser,
@@ -336,6 +338,7 @@ const { theme, setTheme } = useTheme()
 const { signOut } = useAuth()
 
 const imageInput = ref(null)
+const cropFile = ref(null)
 
 const avatarPreview = ref(null)
 const avatarFile = ref(null)
@@ -447,13 +450,15 @@ function handleImageUpload(event) {
 
   errorMessage.value = ''
 
-  // Clean up the previous temporary preview URL.
-  if (avatarPreview.value?.startsWith('blob:')) {
-    URL.revokeObjectURL(avatarPreview.value)
-  }
+  cropFile.value = file
+  event.target.value = ''
+}
 
+function finishAvatarCrop(file) {
+  if (avatarPreview.value?.startsWith('blob:')) URL.revokeObjectURL(avatarPreview.value)
   avatarFile.value = file
   avatarPreview.value = URL.createObjectURL(file)
+  cropFile.value = null
 }
 
 function removeImage() {

@@ -44,6 +44,7 @@ class Notification(models.Model):
         ("like", "Like"),
         ("comment", "Comment"),
         ("comment_reply", "Comment reply"),
+        ("comment_like", "Comment like"),
         ("book_club_join", "Book Club activity"),
         ("book_club_reply", "Book Club reply"),
         ("book_club_admin", "Book Club role"),
@@ -53,6 +54,7 @@ class Notification(models.Model):
     type = models.CharField(max_length=32, choices=TYPE_CHOICES)
     post_id = models.PositiveBigIntegerField(null=True, blank=True)
     resource_id = models.PositiveBigIntegerField(null=True, blank=True)
+    comment_id = models.PositiveBigIntegerField(null=True, blank=True)
     book_club_id = models.PositiveBigIntegerField(null=True, blank=True)
     event_key = models.CharField(max_length=150, null=True, blank=True)
     read = models.BooleanField(default=False)
@@ -98,6 +100,7 @@ def notify(
     *,
     post_id=None,
     resource_id=None,
+    comment_id=None,
     book_club_id=None,
     event_key=None,
 ):
@@ -108,6 +111,7 @@ def notify(
         "type": kind,
         "post_id": post_id,
         "resource_id": resource_id,
+        "comment_id": comment_id,
         "book_club_id": book_club_id,
     }
     if event_key:
