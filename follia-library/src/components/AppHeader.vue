@@ -1,8 +1,9 @@
+```vue
 <template>
   <header class="app-header">
     <div class="header-inner">
-      <!-- Brand -->
-      <RouterLink to="/" class="brand">
+      <!-- Brand: Always at the top left -->
+      <RouterLink to="/" class="brand" aria-label="Follia Library home">
         <BrandLogo />
 
         <div class="brand-text">
@@ -11,41 +12,18 @@
         </div>
       </RouterLink>
 
-      <!-- Search 
-      <form class="header-search" @submit.prevent="performSearch">
-        <Search :size="19" />
-
-        <input
-          v-model="searchQuery"
-          type="text"
-          placeholder="Search anything..."
-          aria-label="Search Follia"
-        />
-
-        <button
-          v-if="searchQuery"
-          type="button"
-          class="search-clear"
-          aria-label="Clear search"
-          @click="clearSearch"
-        >
-          ×
-        </button>
-
-        <button type="submit" class="search-shortcut" aria-label="Search">
-          /
-        </button>
-      </form>
-    -->
-
-    
-      <!-- Header Actions -->
+      <!-- Profile: Always at the top right -->
       <div class="header-actions">
-        <!-- Profile -->
-        <RouterLink to="/account" class="profile-button" aria-label="Account">
+        <RouterLink to="/account" class="profile-button">
           <div class="profile-avatar">
-            <UserAvatar :src="rawAvatarUrl" alt="Profile" :icon-size="20" />
+            <UserAvatar
+              :src="rawAvatarUrl"
+              alt="Profile"
+              :icon-size="20"
+            />
           </div>
+
+          <span class="profile-label">Profile</span>
         </RouterLink>
       </div>
     </div>
@@ -54,18 +32,14 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { Search } from 'lucide-vue-next'
 
 import BrandLogo from './BrandLogo.vue'
 import UserAvatar from './UserAvatar.vue'
 import { useAuth } from '../composables/useAuth'
 import { getMyProfile } from '../services/profileService'
 
-const router = useRouter()
 const { user: authUser, initializeAuth } = useAuth()
 
-const searchQuery = ref('')
 const user = ref(null)
 const profile = ref(null)
 
@@ -83,12 +57,6 @@ const rawAvatarUrl = computed(() => {
     null
   )
 })
-
-/*
-|--------------------------------------------------------------------------
-| Fallback initial
-|--------------------------------------------------------------------------
-*/
 
 /*
 |--------------------------------------------------------------------------
@@ -112,42 +80,113 @@ async function loadUser() {
   }
 }
 
-/*
-|--------------------------------------------------------------------------
-| Search
-|--------------------------------------------------------------------------
-*/
-
-function performSearch() {
-  const query = searchQuery.value.trim()
-
-  router.push({
-    name: 'search',
-    query: query ? { q: query } : {},
-  })
-}
-
-function clearSearch() {
-  searchQuery.value = ''
-  router.push({ name: 'search' })
-}
-
 onMounted(loadUser)
 </script>
 
 <style scoped>
+/* Header */
+.app-header {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.header-inner {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 16px;
+  padding: 12px 24px;
+}
+
+/* Brand: top left */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+
+  flex: 0 1 auto;
+  min-width: 0;
+
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.brand-name {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.brand-subtitle {
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--text-muted, #777);
+}
+
+/* Profile: top right */
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.profile-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+
+  flex: 0 0 auto;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 12px;
+  padding: 2px 4px;
+
+  transition: opacity 0.2s ease;
+}
+
+.profile-button:hover {
+  opacity: 0.8;
+}
+
+.profile-button:focus-visible {
+  outline: 2px solid var(--text-main, #333);
+  outline-offset: 4px;
+}
+
+/* Avatar */
 .profile-avatar {
   width: 40px;
   height: 40px;
   border-radius: 50%;
   overflow: hidden;
+
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--icon-bg);
-  color: var(--text-main);
+
+  background: var(--icon-bg, #f1f1ef);
+  color: var(--text-main, #333);
   font-size: 14px;
   font-weight: 700;
+
   flex-shrink: 0;
 }
 
@@ -158,87 +197,63 @@ onMounted(loadUser)
   object-fit: cover;
 }
 
+/* Label below avatar */
+.profile-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  color: var(--text-main, #333);
+}
+
+/* Tablets and mobile */
 @media (max-width: 768px) {
   .header-inner {
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
-    box-sizing: border-box;
+    padding: 10px 16px;
+    gap: 12px;
   }
 
   .brand {
-    flex: 0 0 auto;
-    min-width: 0;
+    gap: 8px;
   }
 
-  .header-search {
-    flex: 1 1 0;
-    width: 0;
-    min-width: 0;
-    max-width: none;
+  .brand-name {
+    font-size: 17px;
   }
 
-  .header-search input {
-    width: 100%;
-    min-width: 0;
+  .brand-subtitle {
+    font-size: 11px;
   }
 
-  .header-actions {
-    flex: 0 0 auto;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-  }
-
-  .profile-button {
-    flex: 0 0 auto;
+  .profile-avatar {
+    width: 38px;
+    height: 38px;
   }
 }
 
+/* Small phones */
 @media (max-width: 390px) {
   .header-inner {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .brand {
     gap: 6px;
   }
 
-  .header-search {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-
-  .header-search > svg {
-    width: 17px;
-    height: 17px;
-    flex-shrink: 0;
-  }
-
-  .header-search input {
-    min-width: 0;
-    font-size: 12px;
-  }
-
-  .search-shortcut {
-    display: none;
+  .brand-name {
+    font-size: 16px;
   }
 
   .profile-avatar {
     width: 34px;
     height: 34px;
-    font-size: 12px;
-  }
-}
-
-@media (max-width: 360px) {
-  .header-inner {
-    gap: 4px;
   }
 
-  .header-search input {
-    font-size: 11px;
-  }
-
-  .profile-avatar {
-    width: 32px;
-    height: 32px;
+  .profile-label {
+    font-size: 10px;
   }
 }
 </style>

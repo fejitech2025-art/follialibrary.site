@@ -66,12 +66,24 @@ export async function api(path, options = {}) {
   }
 
   const raw = await response.text()
+  const contentType = response.headers.get('content-type') || ''
   let data = null
 
-  try {
-    data = raw ? JSON.parse(raw) : null
-  } catch {
-    data = { detail: raw || response.statusText }
+  if (/\bjson\b/i.test(contentType)) {
+    try {
+      data = raw ? JSON.parse(raw) : null
+    } catch {
+      data = { detail: 'The server returned an invalid JSON response.' }
+    }
+  } else if (response.ok) {
+    throw new Error('The server returned a non-JSON response for an API request.')
+  } else {
+    const isHtml = /\btext\/html\b/i.test(contentType) || /^\s*<!doctype\s+html|^\s*<html\b/i.test(raw)
+    data = {
+      detail: isHtml
+        ? 'The API returned an HTML page instead of JSON. Check that VITE_API_BASE_URL points to the Django API server.'
+        : raw || response.statusText,
+    }
   }
 
   if (!response.ok) {

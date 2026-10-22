@@ -43,19 +43,21 @@
           <strong>Hear about activity while you’re away</strong>
           <p>Allow browser notifications for new follows, comments, replies, and Book Club activity. Your in-app alerts work either way.</p>
           <p v-if="pushError" class="push-error" role="alert">{{ pushError }}</p>
-          <p v-else-if="pushStatus?.reason === 'unconfigured'" class="push-note">Browser push is not configured for this deployment yet.</p>
-          <p v-else-if="pushStatus?.permission === 'denied'" class="push-note">Notifications are blocked in browser settings. In-app alerts remain available.</p>
+          <p v-else-if="pushStatus?.permission === 'denied'" class="push-note">Notifications are blocked in browser settings. Change this site's notification permission in your browser settings to enable them.</p>
+          <p v-else-if="pushStatus?.reason === 'unconfigured'" class="push-note">This deployment has no background push configuration. Browser notifications can still appear while Follia is open.</p>
+          <p v-else-if="pushStatus?.reason === 'push-unsupported'" class="push-note">Background push is unavailable here. Notifications can appear while Follia is open if permission is allowed.</p>
           <p v-else-if="pushStatus?.permission === 'unsupported'" class="push-note">This browser or connection does not support push notifications.</p>
+          <p v-else-if="pushStatus?.permission === 'default'" class="push-note">Choose Enable to allow browser notifications. Permission is requested only after you press the button.</p>
         </div>
         <button
-          v-if="pushStatus?.available"
+          v-if="pushStatus?.notificationSupported"
           type="button"
           class="push-toggle"
-          :disabled="pushLoading"
+          :disabled="pushLoading || pushStatus?.permission === 'denied'"
           @click="togglePush"
         >
           <LoaderCircle v-if="pushLoading" :size="15" class="spin" />
-          {{ pushLoading ? 'Saving...' : pushStatus.subscribed ? 'Turn off' : 'Enable' }}
+          {{ pushLoading ? 'Saving...' : pushStatus.permission === 'denied' ? 'Blocked' : pushStatus.notificationsEnabled ? (pushStatus.available && !pushStatus.subscribed ? 'Enable push' : 'Turn off') : pushStatus.permission === 'granted' ? 'Turn on' : 'Enable' }}
         </button>
       </section>
 
@@ -211,7 +213,6 @@ import {
   getNotificationTypeLabel,
   markAllNotificationsAsRead,
   markNotificationAsRead,
-  subscribeToMyNotifications,
 } from '../services/notificationService'
 
 const router = useRouter()
@@ -228,8 +229,6 @@ const pushStatus = ref(null)
 const pushError = ref('')
 
 const toastMessage = ref('')
-
-let notificationSubscription = null
 
 const unreadCount = computed(() => {
   return notifications.value.filter((notification) => !notification.read).length
@@ -250,10 +249,9 @@ const bookClubNotificationTypes = [
 */
 
 onMounted(async () => {
+  window.addEventListener('follia:notification-change', handleNotificationChange)
   await loadNotifications()
   await loadPushStatus()
-
-  await setupNotificationRealtime()
 })
 
 async function loadPushStatus() {
@@ -266,11 +264,11 @@ async function loadPushStatus() {
 }
 
 async function togglePush() {
-  if (pushLoading.value || !pushStatus.value?.available) return
+  if (pushLoading.value || !pushStatus.value?.notificationSupported || pushStatus.value.permission === 'denied') return
   pushLoading.value = true
   pushError.value = ''
   try {
-    if (pushStatus.value.subscribed) await disablePushNotifications()
+    if (pushStatus.value.notificationsEnabled && (pushStatus.value.subscribed || !pushStatus.value.available)) await disablePushNotifications()
     else await enablePushNotifications()
     await loadPushStatus()
   } catch (error) {
@@ -288,11 +286,7 @@ async function togglePush() {
 */
 
 onBeforeUnmount(() => {
-  if (notificationSubscription) {
-    notificationSubscription.unsubscribe()
-
-    notificationSubscription = null
-  }
+  window.removeEventListener('follia:notification-change', handleNotificationChange)
 })
 
 /*
@@ -316,66 +310,8 @@ async function loadNotifications() {
   }
 }
 
-/*
-|--------------------------------------------------------------------------
-| Realtime notifications
-|--------------------------------------------------------------------------
-*/
-
-async function setupNotificationRealtime() {
-  try {
-    notificationSubscription = await subscribeToMyNotifications((event) => {
-      /*
-       * New notification
-       */
-      if (event.type === 'insert') {
-        const notification = event.notification
-
-        if (!notification) {
-          return
-        }
-
-        /*
-         * Prevent duplicates.
-         */
-        const alreadyExists = notifications.value.some((item) => item.id === notification.id)
-
-        if (!alreadyExists) {
-          notifications.value.unshift(notification)
-        }
-        window.dispatchEvent(new Event('follia:notification-change'))
-
-        return
-      }
-
-      /*
-       * Existing notification changed.
-       */
-      if (event.type === 'update') {
-        const index = notifications.value.findIndex((item) => item.id === event.notification?.id)
-
-        if (index !== -1) {
-          notifications.value[index] = {
-            ...notifications.value[index],
-            ...event.notification,
-          }
-        }
-        window.dispatchEvent(new Event('follia:notification-change'))
-
-        return
-      }
-
-      /*
-       * Notification deleted.
-       */
-      if (event.type === 'delete') {
-        notifications.value = notifications.value.filter((item) => item.id !== event.notificationId)
-        window.dispatchEvent(new Event('follia:notification-change'))
-      }
-    })
-  } catch (error) {
-    console.error('Notifications realtime error:', error)
-  }
+function handleNotificationChange() {
+  if (!loading.value) loadNotifications()
 }
 
 /*

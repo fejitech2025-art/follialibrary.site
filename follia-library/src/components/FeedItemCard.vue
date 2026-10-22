@@ -133,8 +133,8 @@
         ></video>
 
         <div v-else-if="mediaItems.length > 1" class="image-carousel">
-          <div ref="imageTrack" class="image-track" @scroll="handleImageScroll">
-            <img v-for="(media, index) in mediaItems" :key="media.id || index" :src="resolveMediaUrl(media.url)" :alt="'Post image ' + (index + 1)" loading="lazy" @error="postMediaFailed = true" />
+          <div ref="imageTrack" class="image-track" @scroll.passive="handleImageScroll">
+            <img v-for="(media, index) in mediaItems" :key="media.id || index" :src="resolveMediaUrl(media.url)" :alt="'Post image ' + (index + 1)" :aria-label="'Preview image ' + (index + 1)" role="button" tabindex="0" loading="lazy" @click.stop="openImagePreview(index)" @keydown.enter.stop.prevent="openImagePreview(index)" @keydown.space.stop.prevent="openImagePreview(index)" @error="postMediaFailed = true" />
           </div>
           <button v-if="activeImage > 0" class="carousel-arrow previous" type="button" aria-label="Previous image" @click="slideImage(-1)">‹</button>
           <button v-if="activeImage < mediaItems.length - 1" class="carousel-arrow next" type="button" aria-label="Next image" @click="slideImage(1)">›</button>
@@ -142,7 +142,7 @@
           <div class="image-dots"><button v-for="(_, index) in mediaItems" :key="index" type="button" :class="{ active: index === activeImage }" :aria-label="'Show image ' + (index + 1)" @click="goToImage(index)"></button></div>
         </div>
 
-        <img v-else :src="postMediaUrl" alt="Post media" loading="lazy" @error="postMediaFailed = true" />
+        <img v-else :src="postMediaUrl" alt="Post image" role="button" tabindex="0" aria-label="Preview image" loading="lazy" @click.stop="openImagePreview(0)" @keydown.enter.stop.prevent="openImagePreview(0)" @keydown.space.stop.prevent="openImagePreview(0)" @error="postMediaFailed = true" />
         <a v-if="activeMediaDownloadUrl" class="media-download" :href="activeMediaDownloadUrl"><Download :size="14" /> Download {{ mediaItems[0].media_type === 'video' ? 'video' : 'image' }}</a>
       </div>
     </div>
@@ -184,7 +184,7 @@
     </div>
 
     <Teleport to="body">
-      <div v-if="commentsOpen" class="comments-overlay" @click.self="closeComments">
+      <div v-if="commentsOpen" class="comments-overlay" :style="commentsViewportStyle" @click.self="closeComments">
         <section class="comments-modal" role="dialog" aria-modal="true" aria-labelledby="comments-title">
           <header class="comments-header">
             <div><p class="comments-kicker">DISCUSSION</p><h2 id="comments-title">Comments</h2></div>
@@ -202,17 +202,19 @@
                 <div class="comment">
                   <div class="comment-avatar"><UserAvatar :src="comment.profiles?.avatar_url || comment.profiles?.avatar" :alt="comment.profiles?.display_name || comment.profiles?.username || 'Profile picture'" :icon-size="16" /></div>
                   <div class="comment-copy">
-                    <strong>{{ comment.profiles?.display_name || comment.profiles?.username || 'Follia reader' }}</strong>
+                    <RouterLink v-if="commentProfileId(comment)" :to="commentProfileRoute(comment)" class="comment-author-link">{{ comment.profiles?.display_name || comment.profiles?.username || 'Follia reader' }}</RouterLink>
+                    <strong v-else>{{ comment.profiles?.display_name || comment.profiles?.username || 'Follia reader' }}</strong>
                     <p>{{ comment.content }}</p>
-                    <div class="comment-tools"><button class="comment-like" :class="{ liked: comment.liked }" type="button" @click="toggleCommentLike(comment)"><Heart :size="13" :fill="comment.liked ? 'currentColor' : 'none'" /> {{ comment.like_count || 0 }}</button><button class="reply-button" type="button" @click="replyTo(comment)">Reply</button><button class="reply-button" type="button" @click="openReport('comment', comment)">Report</button></div>
+                    <div class="comment-tools"><button class="comment-like" :class="{ liked: comment.liked }" type="button" :disabled="isCommentLikePending(comment)" @click="toggleCommentLike(comment)"><LoaderCircle v-if="isCommentLikePending(comment)" :size="13" class="spin" /><Heart v-else :size="13" :fill="comment.liked ? 'currentColor' : 'none'" /> {{ comment.like_count || 0 }}</button><button class="reply-button" type="button" @click="replyTo(comment)">Reply</button><button class="reply-button" type="button" @click="openReport('comment', comment)">Report</button></div>
                   </div>
                 </div>
                 <div v-for="reply in comment.replies || []" :key="reply.id" class="comment comment-reply">
                   <div class="comment-avatar"><UserAvatar :src="reply.profiles?.avatar_url || reply.profiles?.avatar" :alt="reply.profiles?.display_name || reply.profiles?.username || 'Profile picture'" :icon-size="15" /></div>
                   <div class="comment-copy">
-                    <strong>{{ reply.profiles?.display_name || reply.profiles?.username || 'Follia reader' }}</strong>
+                    <RouterLink v-if="commentProfileId(reply)" :to="commentProfileRoute(reply)" class="comment-author-link">{{ reply.profiles?.display_name || reply.profiles?.username || 'Follia reader' }}</RouterLink>
+                    <strong v-else>{{ reply.profiles?.display_name || reply.profiles?.username || 'Follia reader' }}</strong>
                     <p>{{ reply.content }}</p>
-                    <div class="comment-tools"><button class="comment-like" :class="{ liked: reply.liked }" type="button" @click="toggleCommentLike(reply)"><Heart :size="13" :fill="reply.liked ? 'currentColor' : 'none'" /> {{ reply.like_count || 0 }}</button><button class="reply-button" type="button" @click="openReport('comment', reply)">Report</button></div>
+                    <div class="comment-tools"><button class="comment-like" :class="{ liked: reply.liked }" type="button" :disabled="isCommentLikePending(reply)" @click="toggleCommentLike(reply)"><LoaderCircle v-if="isCommentLikePending(reply)" :size="13" class="spin" /><Heart v-else :size="13" :fill="reply.liked ? 'currentColor' : 'none'" /> {{ reply.like_count || 0 }}</button><button class="reply-button" type="button" @click="openReport('comment', reply)">Report</button></div>
                   </div>
                 </div>
               </article>
@@ -238,6 +240,19 @@
       </div>
     </Teleport>
 
+    <Teleport to="body">
+      <div v-if="imagePreviewIndex !== null" class="image-preview-overlay" role="dialog" aria-modal="true" aria-label="Image preview" :style="previewViewportStyle" @click.self="closeImagePreview" @click.stop>
+        <button class="image-preview-close" type="button" aria-label="Close image preview" @click.stop="closeImagePreview"><X :size="22" /></button>
+        <button v-if="mediaItems.length > 1" class="image-preview-arrow previous" type="button" aria-label="Previous image" @click.stop="stepImagePreview(-1)"><ChevronLeft :size="25" /></button>
+        <img class="image-preview-image" :src="previewImageUrl" :alt="'Post image ' + (imagePreviewIndex + 1)" @click.stop />
+        <button v-if="mediaItems.length > 1" class="image-preview-arrow next" type="button" aria-label="Next image" @click.stop="stepImagePreview(1)"><ChevronRight :size="25" /></button>
+        <div class="image-preview-footer">
+          <span v-if="mediaItems.length > 1">{{ imagePreviewIndex + 1 }} / {{ mediaItems.length }}</span>
+          <a v-if="previewDownloadUrl" :href="previewDownloadUrl" @click.stop><Download :size="15" /> Download image</a>
+        </div>
+      </div>
+    </Teleport>
+
     <div v-if="toast" class="toast">{{ toast }}</div>
     <Teleport to="body">
       <div v-if="showReport" class="report-overlay" @click.self="showReport = false">
@@ -258,12 +273,14 @@
 <script setup>
 import { resolveMediaUrl } from '../utils/media'
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ArrowUpRight,
   BookOpen,
   Bookmark,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Download,
   Flag,
   Heart,
@@ -323,6 +340,7 @@ const commentsLoading = ref(false)
 const commentsError = ref('')
 const commentSubmitError = ref('')
 const commentSubmitting = ref(false)
+const commentLikePendingIds = ref(new Set())
 const commentText = ref('')
 const replyingTo = ref(null)
 const showMenu = ref(false)
@@ -335,6 +353,11 @@ const reportSubmitting = ref(false)
 const videoElement = ref(null)
 const imageTrack = ref(null)
 const activeImage = ref(0)
+const imagePreviewIndex = ref(null)
+const previewViewportHeight = ref(null)
+const previewViewportTop = ref(0)
+const commentsViewportHeight = ref(null)
+const commentsViewportTop = ref(0)
 const isDeleted = ref(false)
 const editing = ref(false)
 const savingEdit = ref(false)
@@ -376,6 +399,22 @@ const activeMediaDownloadUrl = computed(() =>
   mediaItems.value[activeImage.value]?.download_url || props.item.media_download_url || ''
 )
 
+const previewImageUrl = computed(() =>
+  resolveMediaUrl(mediaItems.value[imagePreviewIndex.value]?.url)
+)
+const previewDownloadUrl = computed(() =>
+  mediaItems.value[imagePreviewIndex.value]?.download_url || props.item.media_download_url || ''
+)
+const previewViewportStyle = computed(() => ({
+  '--preview-viewport-height': previewViewportHeight.value ? `${previewViewportHeight.value}px` : '100dvh',
+  '--preview-viewport-top': `${previewViewportTop.value}px`,
+}))
+const commentsViewportStyle = computed(() => ({
+  '--comments-viewport-height': commentsViewportHeight.value ? `${commentsViewportHeight.value}px` : '100dvh',
+  '--comments-viewport-top': `${commentsViewportTop.value}px`,
+}))
+const mediaIdentity = computed(() => mediaItems.value.map((media) => `${media.id || ''}:${media.url || ''}`).join('\u0000'))
+
 const bodySegments = computed(() => {
   const text = currentBody.value || ''
   const pattern = /#[\p{L}_][\p{L}\p{N}_]{0,49}/gu
@@ -401,6 +440,14 @@ const profileRoute = computed(() => ({
   },
 }))
 
+function commentProfileId(comment) {
+  return comment?.profiles?.user_id || comment?.profiles?.id || comment?.user_id || null
+}
+
+function commentProfileRoute(comment) {
+  return { name: 'publisher-detail', params: { id: commentProfileId(comment) } }
+}
+
 const showFollow = computed(() =>
   Boolean(
     (props.item.author_id || author.value.user_id || author.value.id) &&
@@ -422,6 +469,77 @@ const timeAgo = computed(() => {
 })
 
 let videoObserver = null
+let commentsVisualViewport = null
+let previewVisualViewport = null
+let previousBodyOverflow = ''
+
+function updateVisualViewport(target) {
+  const viewport = window.visualViewport
+  target.height.value = viewport?.height || window.innerHeight
+  target.top.value = viewport?.offsetTop || 0
+}
+
+function updateCommentsViewport() {
+  updateVisualViewport({ height: commentsViewportHeight, top: commentsViewportTop })
+}
+
+function updatePreviewViewport() {
+  updateVisualViewport({ height: previewViewportHeight, top: previewViewportTop })
+}
+
+function handlePreviewKeydown(event) {
+  if (event.key === 'Escape') closeImagePreview()
+  else if (event.key === 'ArrowLeft') stepImagePreview(-1)
+  else if (event.key === 'ArrowRight') stepImagePreview(1)
+}
+
+watch(commentsOpen, (open) => {
+  if (open) {
+    previousBodyOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    commentsVisualViewport = window.visualViewport || null
+    updateCommentsViewport()
+    commentsVisualViewport?.addEventListener('resize', updateCommentsViewport)
+    commentsVisualViewport?.addEventListener('scroll', updateCommentsViewport)
+    window.addEventListener('resize', updateCommentsViewport)
+  } else {
+    document.body.style.overflow = previousBodyOverflow
+    commentsVisualViewport?.removeEventListener('resize', updateCommentsViewport)
+    commentsVisualViewport?.removeEventListener('scroll', updateCommentsViewport)
+    window.removeEventListener('resize', updateCommentsViewport)
+    commentsVisualViewport = null
+    commentsViewportHeight.value = null
+    commentsViewportTop.value = 0
+  }
+})
+
+watch(imagePreviewIndex, (index) => {
+  if (index !== null) {
+    previewVisualViewport = window.visualViewport || null
+    updatePreviewViewport()
+    previewVisualViewport?.addEventListener('resize', updatePreviewViewport)
+    previewVisualViewport?.addEventListener('scroll', updatePreviewViewport)
+    window.addEventListener('resize', updatePreviewViewport)
+    window.addEventListener('keydown', handlePreviewKeydown)
+  } else {
+    previewVisualViewport?.removeEventListener('resize', updatePreviewViewport)
+    previewVisualViewport?.removeEventListener('scroll', updatePreviewViewport)
+    window.removeEventListener('resize', updatePreviewViewport)
+    window.removeEventListener('keydown', handlePreviewKeydown)
+    previewVisualViewport = null
+    previewViewportHeight.value = null
+    previewViewportTop.value = 0
+  }
+})
+
+watch(mediaIdentity, async () => {
+  activeImage.value = 0
+  imagePreviewIndex.value = null
+  postMediaFailed.value = false
+  await nextTick()
+  imageTrack.value?.scrollTo({ left: 0 })
+})
+
 onMounted(() => {
   if (!videoElement.value || !('IntersectionObserver' in window)) return
   videoObserver = new IntersectionObserver((entries) => {
@@ -436,18 +554,49 @@ onMounted(() => {
 onBeforeUnmount(() => {
   videoObserver?.disconnect()
   leaveFeedVideo(videoElement.value)
+  document.body.style.overflow = previousBodyOverflow
+  commentsVisualViewport?.removeEventListener('resize', updateCommentsViewport)
+  commentsVisualViewport?.removeEventListener('scroll', updateCommentsViewport)
+  previewVisualViewport?.removeEventListener('resize', updatePreviewViewport)
+  previewVisualViewport?.removeEventListener('scroll', updatePreviewViewport)
+  window.removeEventListener('resize', updateCommentsViewport)
+  window.removeEventListener('resize', updatePreviewViewport)
+  window.removeEventListener('keydown', handlePreviewKeydown)
 })
 
 function handleVideoPlay(event) { handleFeedVideoPlay(event.currentTarget) }
 function handleVideoPause(event) { handleFeedVideoPause(event.currentTarget) }
 function handleImageScroll() {
-  if (imageTrack.value) activeImage.value = Math.round(imageTrack.value.scrollLeft / imageTrack.value.clientWidth)
+  if (!imageTrack.value?.clientWidth) return
+  activeImage.value = Math.max(0, Math.min(mediaItems.value.length - 1, Math.round(imageTrack.value.scrollLeft / imageTrack.value.clientWidth)))
 }
 function slideImage(direction) {
-  imageTrack.value?.scrollBy({ left: imageTrack.value.clientWidth * direction, behavior: 'smooth' })
+  if (!imageTrack.value) return
+  goToImage(activeImage.value + direction)
 }
 function goToImage(index) {
-  imageTrack.value?.scrollTo({ left: imageTrack.value.clientWidth * index, behavior: 'smooth' })
+  if (!imageTrack.value) return
+  const safeIndex = Math.max(0, Math.min(mediaItems.value.length - 1, index))
+  imageTrack.value.scrollTo({ left: imageTrack.value.clientWidth * safeIndex, behavior: 'smooth' })
+}
+
+function openImagePreview(index) {
+  if (!mediaItems.value[index]) return
+  activeImage.value = index
+  imagePreviewIndex.value = index
+  if (mediaItems.value.length > 1) goToImage(index)
+}
+
+function closeImagePreview() {
+  imagePreviewIndex.value = null
+}
+
+function stepImagePreview(direction) {
+  if (imagePreviewIndex.value === null || mediaItems.value.length < 2) return
+  const nextIndex = (imagePreviewIndex.value + direction + mediaItems.value.length) % mediaItems.value.length
+  imagePreviewIndex.value = nextIndex
+  activeImage.value = nextIndex
+  goToImage(nextIndex)
 }
 
 function notify(message) {
@@ -594,11 +743,13 @@ async function submitComment() {
 }
 
 async function toggleCommentLike(comment) {
-  await initializeAuth()
+  if (isCommentLikePending(comment)) return
   const previous = Boolean(comment.liked)
+  commentLikePendingIds.value = new Set([...commentLikePendingIds.value, comment.id])
   comment.liked = !previous
   comment.like_count = Math.max(0, Number(comment.like_count || 0) + (previous ? -1 : 1))
   try {
+    await initializeAuth()
     const result = props.item.kind === 'resource'
       ? await toggleResourceCommentLike(props.item.id, comment.id, previous)
       : await togglePostCommentLike(props.item.id, comment.id, previous)
@@ -608,7 +759,15 @@ async function toggleCommentLike(comment) {
     comment.liked = previous
     comment.like_count = Math.max(0, Number(comment.like_count || 0) + (previous ? 1 : -1))
     notify(error.message || 'Sign in to like this comment.')
+  } finally {
+    const pendingIds = new Set(commentLikePendingIds.value)
+    pendingIds.delete(comment.id)
+    commentLikePendingIds.value = pendingIds
   }
+}
+
+function isCommentLikePending(comment) {
+  return commentLikePendingIds.value.has(comment.id)
 }
 
 async function share() {
@@ -747,17 +906,19 @@ async function saveEdit() {
 .save-edit:disabled { opacity:.5; }
 .post-media { position:relative; overflow:hidden; margin-top:14px; border:1px solid var(--border-soft); border-radius:15px; background:var(--card-soft); }
 .post-media > img,.post-media video { display:block; width:100%; max-height:600px; object-fit:contain; }
-.image-carousel { position:relative; }
-.image-track { display:flex; overflow-x:auto; scroll-snap-type:x mandatory; scrollbar-width:none; }
+.post-media > img { cursor:zoom-in; }
+.image-carousel { position:relative; width:100%; }
+.image-track { width:100%; height:clamp(220px,min(72dvh,600px),600px); display:flex; overflow-x:auto; overflow-y:hidden; scroll-snap-type:x mandatory; scroll-behavior:smooth; overscroll-behavior-x:contain; scrollbar-width:none; touch-action:auto; }
 .image-track::-webkit-scrollbar { display:none; }
-.image-track img { display:block; flex:0 0 100%; width:100%; max-height:600px; object-fit:contain; scroll-snap-align:start; }
-.carousel-arrow { position:absolute; top:50%; z-index:1; width:34px; height:34px; display:grid; place-items:center; transform:translateY(-50%); border-radius:50%; background:rgba(15,17,20,.68); color:white; font-size:25px; line-height:1; }
+.image-track img { display:block; flex:0 0 100%; width:100%; min-width:100%; height:100%; max-height:none; object-fit:contain; scroll-snap-align:start; scroll-snap-stop:always; cursor:zoom-in; }
+.carousel-arrow { position:absolute; top:50%; z-index:1; width:42px; height:42px; display:grid; place-items:center; transform:translateY(-50%); border-radius:50%; background:rgba(15,17,20,.72); color:white; font-size:25px; line-height:1; }
 .carousel-arrow.previous { left:10px; }
 .carousel-arrow.next { right:10px; }
 .image-count { position:absolute; top:10px; right:10px; padding:5px 8px; border-radius:999px; background:rgba(15,17,20,.68); color:white; font-size:10px; }
 .image-dots { position:absolute; left:0; right:0; bottom:11px; display:flex; justify-content:center; gap:5px; pointer-events:none; }
-.image-dots button { width:6px; height:6px; padding:0; border-radius:50%; background:rgba(255,255,255,.55); pointer-events:auto; }
-.image-dots button.active { background:white; transform:scale(1.25); }
+.image-dots button { width:30px; height:30px; display:grid; place-items:center; padding:0; background:transparent; pointer-events:auto; }
+.image-dots button::before { content:''; width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.62); transition:transform .16s ease,background .16s ease; }
+.image-dots button.active::before { background:white; transform:scale(1.25); }
 .media-download { display:flex; align-items:center; justify-content:flex-end; gap:6px; padding:8px 11px; color:var(--text-secondary); font-size:10px; font-weight:700; }
 .resource-body { display:flex; align-items:center; justify-content:space-between; gap:18px; margin:16px 0 13px; padding:17px; border:1px solid var(--border-soft); border-radius:16px; background:var(--card-soft); }
 .resource-copy { min-width:0; }
@@ -775,33 +936,46 @@ async function saveEdit() {
 .engagement-button.liked { color:#9e463a; }
 .save-button { margin-left:auto; }
 .save-button.saved { color:var(--text-main); }
-.comments-overlay { position:fixed; inset:0; z-index:400; display:grid; place-items:center; padding:20px; background:rgba(14,15,17,.55); backdrop-filter:blur(5px); }
-.comments-modal { width:min(540px,100%); max-height:min(760px,85dvh); display:grid; grid-template-rows:auto minmax(0,1fr) auto; overflow:hidden; border:1px solid var(--border-color); border-radius:22px; background:var(--card-bg); box-shadow:0 24px 80px rgba(0,0,0,.24); }
-.comments-header { display:flex; align-items:center; justify-content:space-between; padding:18px 20px; border-bottom:1px solid var(--border-soft); }
-.comments-header h2 { margin:0; color:var(--text-main); font:750 19px Manrope,sans-serif; }
+.comments-overlay { position:fixed; left:0; right:0; top:var(--comments-viewport-top,0px); height:var(--comments-viewport-height,100dvh); z-index:400; display:grid; place-items:center; padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left)); box-sizing:border-box; background:rgba(14,15,17,.58); backdrop-filter:blur(6px); }
+.comments-modal { width:min(620px,100%); height:min(720px,calc(var(--comments-viewport-height,100dvh) - 48px)); max-height:calc(var(--comments-viewport-height,100dvh) - 48px); min-height:min(340px,calc(var(--comments-viewport-height,100dvh) - 48px)); display:grid; grid-template-rows:auto minmax(0,1fr) auto; overflow:hidden; border:1px solid var(--border-color); border-radius:24px; background:var(--card-bg); box-shadow:0 24px 80px rgba(0,0,0,.24); }
+.comments-header { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:20px 24px; border-bottom:1px solid var(--border-soft); }
+.comments-header h2 { margin:0; color:var(--text-main); font:750 21px/1.2 Manrope,sans-serif; letter-spacing:-.02em; }
 .comments-kicker { margin:0 0 4px; color:var(--text-tertiary); font-size:9px; font-weight:750; letter-spacing:.14em; }
-.comments-close { width:34px; height:34px; display:grid; place-items:center; border-radius:10px; background:var(--icon-bg); color:var(--text-main); }
-.comments-list { min-height:0; display:grid; align-content:start; gap:17px; overflow:auto; padding:18px 20px; overscroll-behavior:contain; }
-.comments-state { padding:24px 10px; color:var(--text-tertiary); font-size:12px; text-align:center; }
-.comments-error button,.reply-button { margin-top:6px; padding:0; background:transparent; color:var(--text-secondary); font-size:10px; font-weight:700; }
-.comment-thread { display:grid; gap:12px; }
-.comment { display:flex; align-items:flex-start; gap:10px; }
-.comment-avatar { width:32px; height:32px; flex:0 0 32px; display:grid; place-items:center; border-radius:50%; background:var(--icon-bg); color:var(--text-secondary); }
-.comment-copy { min-width:0; flex:1; }
-.comment strong { display:block; margin:1px 0 4px; color:var(--text-main); font-size:11px; }
-.comment p { margin:0; color:var(--text-secondary); font-size:12px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
-.comment-tools { display:flex; align-items:center; gap:12px; margin-top:5px; }
-.comment-like { display:inline-flex; align-items:center; gap:4px; padding:0; background:transparent; color:var(--text-tertiary); font-size:10px; }
+.comments-close { width:42px; height:42px; flex:0 0 42px; display:grid; place-items:center; border-radius:12px; background:var(--icon-bg); color:var(--text-main); }
+.comments-list { min-height:0; display:grid; align-content:start; gap:20px; overflow-y:auto; overflow-x:hidden; padding:22px 24px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+.comments-state { padding:28px 12px; color:var(--text-tertiary); font-size:13px; line-height:1.5; text-align:center; }
+.comments-error button,.reply-button { min-height:34px; margin-top:5px; padding:0 4px; background:transparent; color:var(--text-secondary); font-size:11px; font-weight:700; }
+.comments-error button:hover,.reply-button:hover { color:var(--text-main); }
+.comment-thread { display:grid; gap:15px; min-width:0; }
+.comment { display:flex; align-items:flex-start; gap:12px; min-width:0; }
+.comment-avatar { width:40px; height:40px; flex:0 0 40px; display:grid; place-items:center; overflow:hidden; border-radius:50%; background:var(--icon-bg); color:var(--text-secondary); }
+.comment-copy { min-width:0; flex:1; overflow-wrap:anywhere; }
+.comment strong,.comment-author-link { display:block; max-width:100%; margin:1px 0 5px; color:var(--text-main); font-size:13px; line-height:1.4; font-weight:750; overflow-wrap:anywhere; }
+.comment-author-link { width:fit-content; text-decoration:underline; text-decoration-color:transparent; text-underline-offset:3px; transition:color .15s ease,text-decoration-color .15s ease; }
+.comment-author-link:hover { color:var(--text-secondary); text-decoration-color:currentColor; }
+.comment-author-link:focus-visible { border-radius:3px; outline:2px solid var(--primary-bg); outline-offset:3px; text-decoration-color:currentColor; }
+.comment p { margin:0; color:var(--text-secondary); font-size:13px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; }
+.comment-tools { display:flex; align-items:center; flex-wrap:wrap; gap:8px 13px; margin-top:7px; }
+.comment-like { min-height:34px; display:inline-flex; align-items:center; gap:5px; padding:0 3px; background:transparent; color:var(--text-tertiary); font-size:11px; }
 .comment-like.liked { color:#9e463b; }
-.comment-reply { margin-left:38px; }
-.comment-form { padding:12px 16px max(13px,env(safe-area-inset-bottom)); border-top:1px solid var(--border-soft); background:var(--card-bg); }
-.replying-to { display:flex; align-items:center; justify-content:space-between; margin:0 0 9px; color:var(--text-tertiary); font-size:10px; }
-.replying-to button { display:grid; place-items:center; width:24px; height:24px; border-radius:7px; background:var(--icon-bg); color:var(--text-secondary); }
-.comment-input-row { display:flex; gap:9px; }
-.comment-input-row input { flex:1; min-width:0; height:42px; padding:0 13px; border:1px solid var(--border-color); border-radius:12px; outline:0; background:var(--input-bg); color:var(--text-main); font-size:12px; }
+.comment-reply { margin-left:48px; }
+.comment-form { padding:14px 20px max(16px,env(safe-area-inset-bottom)); border-top:1px solid var(--border-soft); background:var(--card-bg); }
+.replying-to { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 0 9px; color:var(--text-tertiary); font-size:11px; overflow-wrap:anywhere; }
+.replying-to button { width:34px; height:34px; flex:0 0 34px; display:grid; place-items:center; border-radius:9px; background:var(--icon-bg); color:var(--text-secondary); }
+.comment-input-row { display:flex; gap:10px; }
+.comment-input-row input { flex:1; min-width:0; height:48px; padding:0 15px; border:1px solid var(--border-color); border-radius:13px; outline:0; background:var(--input-bg); color:var(--text-main); font-size:14px; }
 .comment-input-row input:focus { border-color:var(--text-tertiary); }
-.comment-input-row button { width:42px; flex:0 0 42px; display:grid; place-items:center; border-radius:12px; background:var(--primary-bg); color:var(--primary-text); }
+.comment-input-row button { width:48px; height:48px; flex:0 0 48px; display:grid; place-items:center; border-radius:13px; background:var(--primary-bg); color:var(--primary-text); }
 .comment-input-row button:disabled { opacity:.5; }
+.image-preview-overlay { position:fixed; left:0; right:0; top:var(--preview-viewport-top,0px); height:var(--preview-viewport-height,100dvh); z-index:550; display:grid; grid-template-rows:minmax(0,1fr) auto; align-items:center; gap:10px; padding:max(22px,env(safe-area-inset-top)) max(22px,env(safe-area-inset-right)) max(20px,env(safe-area-inset-bottom)) max(22px,env(safe-area-inset-left)); box-sizing:border-box; background:rgba(9,10,12,.94); backdrop-filter:blur(8px); }
+.image-preview-image { grid-row:1; display:block; width:100%; height:100%; min-height:0; object-fit:contain; }
+.image-preview-close,.image-preview-arrow { z-index:1; width:48px; height:48px; display:grid; place-items:center; border:1px solid rgba(255,255,255,.2); border-radius:50%; background:rgba(30,31,34,.78); color:white; }
+.image-preview-close { position:absolute; top:max(18px,env(safe-area-inset-top)); right:max(18px,env(safe-area-inset-right)); }
+.image-preview-arrow.previous,.image-preview-arrow.next { position:absolute; top:50%; transform:translateY(-50%); }
+.image-preview-arrow.previous { left:max(20px,env(safe-area-inset-left)); }
+.image-preview-arrow.next { right:max(20px,env(safe-area-inset-right)); }
+.image-preview-footer { grid-row:2; display:flex; align-items:center; justify-content:center; gap:18px; color:rgba(255,255,255,.82); font-size:12px; }
+.image-preview-footer a { min-height:42px; display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:0 14px; border:1px solid rgba(255,255,255,.2); border-radius:11px; color:white; font-size:12px; font-weight:700; }
 .toast { position:absolute; right:14px; bottom:64px; padding:10px 13px; border-radius:10px; background:var(--text-main); color:var(--card-bg); font-size:11px; box-shadow:0 5px 16px var(--shadow-color); }
 .report-overlay { position:fixed; inset:0; z-index:600; display:grid; place-items:center; padding:18px; background:rgba(14,15,17,.62); backdrop-filter:blur(5px); }
 .report-dialog { width:min(430px,100%); display:grid; gap:9px; padding:21px; border:1px solid var(--border-color); border-radius:19px; background:var(--card-bg); box-shadow:0 24px 80px rgba(0,0,0,.25); }
@@ -833,8 +1007,16 @@ async function saveEdit() {
   .post-text { font-size:13px; }
   .card-actions { gap:14px; }
   .action-word { display:none; }
-  .comments-overlay { align-items:end; padding:0; }
-  .comments-modal { width:100%; max-height:90dvh; border-radius:22px 22px 0 0; }
-  .comments-list { padding:15px 16px; }
+  .image-track { height:clamp(220px,min(66dvh,600px),600px); }
+  .carousel-arrow { width:40px; height:40px; }
+  .comments-overlay { align-items:end; padding:env(safe-area-inset-top) 0 0; }
+  .comments-modal { width:100%; height:100%; max-height:100%; min-height:0; border-right:0; border-bottom:0; border-left:0; border-radius:24px 24px 0 0; }
+  .comments-header { padding:16px 18px; }
+  .comments-list { padding:18px; gap:18px; }
+  .comment-avatar { width:38px; height:38px; flex-basis:38px; }
+  .comment-reply { margin-left:32px; }
+  .comment-form { padding:12px 14px max(16px,env(safe-area-inset-bottom)); }
+  .image-preview-overlay { gap:6px; padding-right:max(10px,env(safe-area-inset-right)); padding-left:max(10px,env(safe-area-inset-left)); }
+  .image-preview-arrow { width:40px; height:40px; }
 }
 </style>

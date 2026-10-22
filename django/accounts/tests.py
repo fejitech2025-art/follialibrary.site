@@ -2,12 +2,15 @@ from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.test import TestCase
 from django.urls import resolve
+from django.urls import reverse
 from rest_framework.test import APIClient
 
 from .models import Follow, Notification, Profile, PushSubscription
 
 
 User = get_user_model()
+
+
 
 
 class NotificationAndPushApiTests(TestCase):
@@ -119,3 +122,14 @@ class GoogleOnlyAuthenticationConfigurationTests(TestCase):
         self.assertTrue(google["EMAIL_AUTHENTICATION_AUTO_CONNECT"])
         self.assertEqual(google["AUTH_PARAMS"]["prompt"], "select_account")
         self.assertEqual(resolve("/accounts/google/login/callback/").url_name, "google_callback")
+
+
+class PublicUserCountPageTests(TestCase):
+    def test_users_page_is_public_and_shows_registered_user_count(self):
+        User.objects.create_user(username="public-reader")
+        response = self.client.get(reverse("public-user-count"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Follia Library users")
+        self.assertContains(response, ">1</output>")
+
+

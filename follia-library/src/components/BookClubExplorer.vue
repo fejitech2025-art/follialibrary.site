@@ -268,6 +268,7 @@ const error = ref('')
 
 const showCreateModal = ref(false)
 const creating = ref(false)
+const failedClubAvatars = ref(new Set())
 
 const avatarInput = ref(null)
 const avatarFile = ref(null)

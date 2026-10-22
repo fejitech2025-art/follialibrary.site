@@ -6,7 +6,7 @@
           <div>
             <p class="feed-kicker">FOLLIA · DISCOVER ANYTHING</p>
            
-            <p class="feed-description">Ideas, stories, people and resources worth passing along.</p>
+            
           </div>
           <RouterLink to="/explore" class="explore-link">Explore <ArrowUpRight :size="16" /></RouterLink>
         </header>

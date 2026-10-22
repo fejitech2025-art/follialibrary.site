@@ -41,6 +41,8 @@ class ResourceCommentReplyApiTests(TestCase):
         self.assertEqual(len(thread.data), 1)
         self.assertEqual(len(thread.data[0]["replies"]), 1)
         self.assertEqual(thread.data[0]["replies"][0]["user_id"], self.reader.pk)
+        self.assertEqual(thread.data[0]["profiles"]["user_id"], self.author.pk)
+        self.assertEqual(thread.data[0]["replies"][0]["profiles"]["user_id"], self.reader.pk)
 
     def test_reply_must_target_a_root_comment_on_the_same_resource(self):
         unrelated = ResourceComment.objects.create(
@@ -88,6 +90,8 @@ class ResourceCommentReplyApiTests(TestCase):
         url = f"/api/resources/{self.resource.pk}/comments/{comment.pk}/like/"
         first = self.client.post(url)
         retry = self.client.post(url)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first["Content-Type"], "application/json")
         self.assertEqual(first.data, {"liked": True, "count": 1})
         self.assertEqual(retry.data, {"liked": True, "count": 1})
         self.assertEqual(comment.likes.count(), 1)

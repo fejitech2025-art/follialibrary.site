@@ -16,6 +16,8 @@ from .models import ContentReport, Post, PostBookmark, PostComment, PostCommentL
 from .serializers import PostCommentSerializer, PostSerializer
 from config.watermark import WatermarkProcessingError, watermarked_download
 
+MAX_POST_VIDEO_SIZE = 40 * 1024 * 1024
+
 
 def visible_posts(request):
     query = Post.objects.select_related("author__profile").prefetch_related("likes", "comments", "bookmarks", "media_items")
@@ -88,8 +90,8 @@ def validate_post_uploads(uploads):
     videos = [upload for upload in uploads if uploaded_media_type(upload) == "video"]
     if videos and len(uploads) > 1:
         return "Attach one video at a time. Videos cannot be combined with other media."
-    if videos and videos[0].size > 10 * 1024 * 1024:
-        return "Videos must be 10 MB or smaller."
+    if videos and videos[0].size > MAX_POST_VIDEO_SIZE:
+        return "Videos must be 40 MB or smaller."
     if any(uploaded_media_type(upload) != "video" and upload.size > 50 * 1024 * 1024 for upload in uploads):
         return "Post images must be 50 MB or smaller."
     return ""

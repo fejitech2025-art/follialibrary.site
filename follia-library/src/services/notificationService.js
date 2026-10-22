@@ -22,13 +22,25 @@ export async function markAllNotificationsAsRead() {
 }
 
 export async function getPushStatus() {
+  const notificationSupported = 'Notification' in window
+  const permission = notificationSupported ? Notification.permission : 'unsupported'
+  const notificationsEnabled = permission === 'granted' && !browserNotificationsOptedOut()
+  const baseStatus = {
+    available: false,
+    subscribed: false,
+    permission,
+    notificationSupported,
+    notificationsEnabled,
+    reason: '',
+  }
+
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || !window.isSecureContext) {
-    return { available: false, subscribed: false, permission: 'unsupported', reason: 'unsupported' }
+    return { ...baseStatus, reason: notificationSupported ? 'push-unsupported' : 'unsupported' }
   }
 
   const registration = await navigator.serviceWorker.getRegistration()
   if (!registration) {
-    return { available: false, subscribed: false, permission: Notification.permission, reason: 'unsupported' }
+    return { ...baseStatus, reason: 'push-unsupported' }
   }
 
   const [server, config] = await Promise.all([
@@ -40,7 +52,9 @@ export async function getPushStatus() {
     available: Boolean(config?.enabled && config?.public_key),
     reason: config?.enabled ? '' : 'unconfigured',
     subscribed: Boolean(server?.subscribed && subscription),
-    permission: Notification.permission,
+    permission,
+    notificationSupported,
+    notificationsEnabled,
     registration,
     publicKey: config?.public_key || '',
     subscription,
@@ -48,15 +62,20 @@ export async function getPushStatus() {
 }
 
 export async function enablePushNotifications() {
-  const status = await getPushStatus()
-  if (!status.available) throw new Error('Browser push notifications are not configured or supported here.')
-
+  if (!('Notification' in window)) throw new Error('This browser does not support browser notifications.')
   let permission = Notification.permission
   if (permission === 'default') permission = await Notification.requestPermission()
   if (permission !== 'granted') {
     throw new Error(permission === 'denied'
       ? 'Notifications are blocked in browser settings. You can enable them there later.'
       : 'Notification permission was not granted.')
+  }
+
+  try { localStorage.removeItem('follia-browser-notifications-disabled') } catch {}
+  const status = await getPushStatus()
+  if (!status.available) {
+    window.dispatchEvent(new Event('follia:notification-change'))
+    return { subscribed: false, foregroundOnly: true }
   }
 
   const subscription = status.subscription || await status.registration.pushManager.subscribe({
@@ -68,20 +87,37 @@ export async function enablePushNotifications() {
     body: subscription.toJSON(),
   })
   window.dispatchEvent(new Event('follia:notification-change'))
-  return true
+  return { subscribed: true, foregroundOnly: false }
 }
 
 export async function disablePushNotifications() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
-  const registration = await navigator.serviceWorker.ready
+  try { localStorage.setItem('follia-browser-notifications-disabled', '1') } catch {}
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    window.dispatchEvent(new Event('follia:notification-change'))
+    return
+  }
+  const registration = await navigator.serviceWorker.getRegistration()
+  if (!registration) {
+    window.dispatchEvent(new Event('follia:notification-change'))
+    return
+  }
   const subscription = await registration.pushManager.getSubscription()
-  if (!subscription) return
-  await api('/api/push/subscriptions/', {
-    method: 'DELETE',
-    body: { endpoint: subscription.endpoint },
-  })
-  await subscription.unsubscribe()
+  if (subscription) {
+    await api('/api/push/subscriptions/', {
+      method: 'DELETE',
+      body: { endpoint: subscription.endpoint },
+    })
+    await subscription.unsubscribe()
+  }
   window.dispatchEvent(new Event('follia:notification-change'))
+}
+
+function browserNotificationsOptedOut() {
+  try {
+    return localStorage.getItem('follia-browser-notifications-disabled') === '1'
+  } catch {
+    return false
+  }
 }
 
 function decodeVapidKey(value) {

@@ -23,7 +23,7 @@ the shared media storage configured in `config/settings.py`. With the R2
 variables below set, Django uploads those files to Cloudflare R2. Without R2
 credentials, local debug mode uses `django/media/`; production media uploads
 are rejected until R2 is configured. Downloadable resource files continue to
-use the existing local file storage. Videos are limited to 10 MB per file on
+use the existing local file storage. Videos are limited to 40 MB per file on
 regular-post create and edit endpoints.
 
 Set these variables in `django/.env` for local R2 use and in the backend

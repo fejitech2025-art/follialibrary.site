@@ -411,7 +411,7 @@
                 </div>
 
                 <p>{{ comment.content }}</p>
-                <div class="comment-tools"><button type="button" class="comment-like" :class="{ liked: comment.liked }" @click="toggleCommentLike(comment)"><Heart :size="13" :fill="comment.liked ? 'currentColor' : 'none'" /> {{ comment.like_count || 0 }}</button><button type="button" class="reply-comment" @click="replyTo(comment)">Reply</button><button type="button" class="reply-comment" @click="openResourceReport('comment', comment)">Report</button></div>
+                <div class="comment-tools"><button type="button" class="comment-like" :class="{ liked: comment.liked }" :disabled="isCommentLikePending(comment)" @click="toggleCommentLike(comment)"><LoaderCircle v-if="isCommentLikePending(comment)" :size="13" class="spin" /><Heart v-else :size="13" :fill="comment.liked ? 'currentColor' : 'none'" /> {{ comment.like_count || 0 }}</button><button type="button" class="reply-comment" @click="replyTo(comment)">Reply</button><button type="button" class="reply-comment" @click="openResourceReport('comment', comment)">Report</button></div>
               </div>
             </div>
               <div v-for="reply in comment.replies || []" :key="reply.id" class="comment-reply">
@@ -419,7 +419,7 @@
                 <div class="comment-body">
                   <div class="comment-meta"><strong>{{ reply.profiles?.display_name || reply.profiles?.username || 'Follia reader' }}</strong><span>{{ formatCommentTime(reply.created_at) }}</span></div>
                   <p>{{ reply.content }}</p>
-                  <div class="comment-tools"><button type="button" class="comment-like" :class="{ liked: reply.liked }" @click="toggleCommentLike(reply)"><Heart :size="13" :fill="reply.liked ? 'currentColor' : 'none'" /> {{ reply.like_count || 0 }}</button><button type="button" class="reply-comment" @click="openResourceReport('comment', reply)">Report</button></div>
+                  <div class="comment-tools"><button type="button" class="comment-like" :class="{ liked: reply.liked }" :disabled="isCommentLikePending(reply)" @click="toggleCommentLike(reply)"><LoaderCircle v-if="isCommentLikePending(reply)" :size="13" class="spin" /><Heart v-else :size="13" :fill="reply.liked ? 'currentColor' : 'none'" /> {{ reply.like_count || 0 }}</button><button type="button" class="reply-comment" @click="openResourceReport('comment', reply)">Report</button></div>
                 </div>
               </div>
             </article>
@@ -539,6 +539,7 @@ const comments = ref([])
 const commentCount = ref(0)
 const commentsLoading = ref(false)
 const commentSubmitting = ref(false)
+const commentLikePendingIds = ref(new Set())
 const commentsError = ref('')
 const commentSubmitError = ref('')
 
@@ -737,7 +738,9 @@ async function addComment() {
 }
 
 async function toggleCommentLike(comment) {
+  if (isCommentLikePending(comment)) return
   const previous = Boolean(comment.liked)
+  commentLikePendingIds.value = new Set([...commentLikePendingIds.value, comment.id])
   comment.liked = !previous
   comment.like_count = Math.max(0, Number(comment.like_count || 0) + (previous ? -1 : 1))
   try {
@@ -748,7 +751,15 @@ async function toggleCommentLike(comment) {
     comment.liked = previous
     comment.like_count = Math.max(0, Number(comment.like_count || 0) + (previous ? 1 : -1))
     showToast(error.message || 'Sign in to like this comment.')
+  } finally {
+    const pendingIds = new Set(commentLikePendingIds.value)
+    pendingIds.delete(comment.id)
+    commentLikePendingIds.value = pendingIds
   }
+}
+
+function isCommentLikePending(comment) {
+  return commentLikePendingIds.value.has(comment.id)
 }
 
 function openResourceReport(type, comment = null) {
@@ -1371,16 +1382,25 @@ function formatCommentTime(dateString) {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: max(12px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
   background: rgba(0, 0, 0, 0.48);
   backdrop-filter: blur(5px);
 }
 
 .comments-modal {
   width: min(620px, 100%);
-  max-height: min(720px, 90vh);
+  height: min(720px, calc(100dvh - 40px));
+  min-height: min(420px, calc(100dvh - 40px));
+  max-height: calc(100dvh - 40px);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  flex: 0 1 auto;
   overflow: hidden;
   border-radius: 24px;
   background: var(--card-bg);
@@ -1392,6 +1412,7 @@ function formatCommentTime(dateString) {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  flex: 0 0 auto;
   padding: 22px 24px;
   border-bottom: 1px solid var(--border-color);
 }
@@ -1424,9 +1445,12 @@ function formatCommentTime(dateString) {
 }
 
 .comments-list {
-  flex: 1;
-  min-height: 180px;
+  flex: 1 1 0;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 8px 24px 18px;
 }
 
@@ -1520,6 +1544,7 @@ function formatCommentTime(dateString) {
 .comment-tools { display:flex; align-items:center; gap:12px; margin-top:7px; }
 .comment-like { display:inline-flex; align-items:center; gap:4px; padding:0; background:transparent; color:var(--text-tertiary); font-size:10px; }
 .comment-like.liked { color:#9e463a; }
+.comment-like:disabled { cursor:wait; opacity:.7; }
 
 .replying-to {
   display: flex;
@@ -1592,8 +1617,9 @@ function formatCommentTime(dateString) {
 
 .comment-input {
   display: flex;
+  flex: 0 0 auto;
   gap: 9px;
-  padding: 16px 20px;
+  padding: 16px 20px max(16px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--border-color);
   background: var(--card-soft);
 }
@@ -1741,12 +1767,18 @@ function formatCommentTime(dateString) {
 
   .comments-overlay {
     align-items: flex-end;
-    padding: 0;
+    padding: max(12px, env(safe-area-inset-top)) 0 0;
   }
 
   .comments-modal {
     width: 100%;
-    max-height: 88vh;
+    height: calc(100dvh - max(12px, env(safe-area-inset-top)));
+    min-height: min(420px, calc(100dvh - max(12px, env(safe-area-inset-top))));
+    max-height: calc(100dvh - max(12px, env(safe-area-inset-top)));
+    flex: 0 0 auto;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
     border-radius: 24px 24px 0 0;
   }
 

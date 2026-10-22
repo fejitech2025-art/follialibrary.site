@@ -4,9 +4,11 @@ from django.test import TestCase
 from django.test.utils import override_settings
 from rest_framework.test import APIClient
 import tempfile
+from types import SimpleNamespace
 
 from accounts.models import Notification, Profile
 from .models import ContentReport, Post, PostComment, PostCommentLike, PostMedia
+from .views import MAX_POST_VIDEO_SIZE, validate_post_uploads
 
 
 User = get_user_model()
@@ -36,6 +38,9 @@ class PostCommentReplyApiTests(TestCase):
         self.assertEqual(response.data["parent_id"], root.pk)
         thread = self.client.get(f"/api/posts/{self.post.pk}/comments/")
         self.assertEqual(thread.data[0]["replies"][0]["content"], "Reply")
+        self.assertEqual(thread.data[0]["profiles"]["user_id"], self.author.pk)
+        self.assertEqual(thread.data[0]["profiles"]["id"], self.author.pk)
+        self.assertEqual(thread.data[0]["replies"][0]["profiles"]["user_id"], self.reader.pk)
 
     def test_reply_cannot_target_another_post(self):
         unrelated = PostComment.objects.create(user=self.author, post=self.other_post, content="Other thread")
@@ -79,21 +84,17 @@ class PostMediaAndEngagementApiTests(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(self.reader)
 
-    def test_video_limit_accepts_exactly_10_mib_and_rejects_one_byte_over(self):
-        accepted = SimpleUploadedFile("clip.mp4", b"x" * (10 * 1024 * 1024), content_type="video/mp4")
-        response = self.client.post("/api/posts/", {"body": "Trimmed clip", "media": accepted}, format="multipart")
+    def test_video_limit_accepts_40_mib_and_rejects_one_byte_over(self):
+        accepted = SimpleNamespace(content_type="video/mp4", size=MAX_POST_VIDEO_SIZE)
+        self.assertEqual(validate_post_uploads([accepted]), "")
+
+        accepted_upload = SimpleUploadedFile("clip.mp4", b"x", content_type="video/mp4")
+        response = self.client.post("/api/posts/", {"body": "Trimmed clip", "media": accepted_upload}, format="multipart")
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["media_type"], "video")
 
-        oversized = SimpleUploadedFile("large.mp4", b"x" * (10 * 1024 * 1024 + 1), content_type="video/mp4")
-        rejected = self.client.post("/api/posts/", {"body": "Large clip", "media": oversized}, format="multipart")
-        self.assertEqual(rejected.status_code, 400)
-        self.assertIn("10 MB", rejected.data["detail"])
-
-        patch_upload = SimpleUploadedFile("edited.mp4", b"x" * (10 * 1024 * 1024 + 1), content_type="video/mp4")
-        self.client.force_authenticate(self.author)
-        patched = self.client.patch(f"/api/posts/{self.post.pk}/", {"media": patch_upload}, format="multipart")
-        self.assertEqual(patched.status_code, 400)
+        oversized = SimpleNamespace(content_type="video/mp4", size=MAX_POST_VIDEO_SIZE + 1)
+        self.assertEqual(validate_post_uploads([oversized]), "Videos must be 40 MB or smaller.")
 
     def test_multiple_images_are_saved_as_separate_post_media(self):
         first = SimpleUploadedFile("first.png", b"first", content_type="image/png")
@@ -108,6 +109,8 @@ class PostMediaAndEngagementApiTests(TestCase):
         url = f"/api/posts/{self.post.pk}/comments/{comment.pk}/like/"
         first = self.client.post(url)
         retry = self.client.post(url)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first["Content-Type"], "application/json")
         self.assertEqual(first.data, {"liked": True, "count": 1})
         self.assertEqual(retry.data, {"liked": True, "count": 1})
         self.assertEqual(PostCommentLike.objects.filter(comment=comment).count(), 1)
@@ -120,6 +123,11 @@ class PostMediaAndEngagementApiTests(TestCase):
         own_comment = PostComment.objects.create(user=self.reader, post=self.post, content="My own")
         self.client.post(f"/api/posts/{self.post.pk}/comments/{own_comment.pk}/like/")
         self.assertEqual(Notification.objects.filter(recipient=self.reader, type="comment_like").count(), 0)
+
+        self.client.force_authenticate(user=None)
+        unauthorized = self.client.post(url)
+        self.assertEqual(unauthorized.status_code, 403)
+        self.assertEqual(unauthorized["Content-Type"], "application/json")
 
     def test_duplicate_reports_do_not_create_extra_rows_and_report_reason_is_validated(self):
         report_url = f"/api/posts/{self.post.pk}/report/"

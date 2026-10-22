@@ -1728,8 +1728,8 @@ function clearBookSearch() {
 
 .chat-shell {
   position: relative;
-  height: calc(100vh - 144px);
-  min-height: 500px;
+  height: min(680px, max(180px, calc(100dvh - 260px)));
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1741,11 +1741,13 @@ function clearBookSearch() {
 /* Messages */
 .messages-container {
   position: relative;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   scrollbar-width: thin;
 }
 
@@ -2030,7 +2032,7 @@ function clearBookSearch() {
   flex-shrink: 0;
   width: 100%;
   box-sizing: border-box;
-  padding: 8px 12px 12px;
+  padding: 8px 12px max(12px,env(safe-area-inset-bottom));
   border-top: 1px solid var(--border-soft);
   background: color-mix(in srgb, var(--card-bg) 95%, transparent);
   backdrop-filter: blur(16px);
@@ -2797,13 +2799,13 @@ function clearBookSearch() {
   .club-header-avatar { width: 40px; height: 40px; flex-basis: 40px; }
   .header-icon-button { width: 37px; height: 37px; flex-basis: 37px; }
   .club-tabs { top: 64px; }
-  .chat-shell { height: calc(100vh - 138px); min-height: 460px; }
+  .chat-shell { height: min(680px, max(180px, calc(100dvh - 260px))); min-height: 0; }
   .messages-list { padding-left: 9px; padding-right: 9px; }
   .message-main { max-width: 83%; }
   .message-text { font-size: 12.5px; }
   .message-more { opacity: 1; }
   .message-menu { width: 160px; }
-  .message-composer { padding-left: 8px; padding-right: 8px; padding-bottom: 9px; }
+  .message-composer { padding-left: 8px; padding-right: 8px; padding-bottom: max(12px,env(safe-area-inset-bottom)); }
   .join-card { margin-left: 10px; margin-right: 10px; }
   .section-content { padding: 12px; }
   .books-section { gap: 14px; }

@@ -10,6 +10,7 @@ from social import views as social_views
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("users/", account_views.public_user_count, name="public-user-count"),
     path("accounts/", include("allauth.urls")),
     path("api/auth/csrf/", account_views.csrf_token, name="csrf-token"),
     path("api/auth/me/", account_views.current_user, name="current-user"),

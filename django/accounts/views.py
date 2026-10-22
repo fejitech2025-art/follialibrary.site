@@ -9,6 +9,8 @@ from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import IntegrityError
 from django.db.models import Subquery
+from django.shortcuts import render
+from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.utils.text import slugify
@@ -24,6 +26,11 @@ from .models import Follow, Notification, Profile, notify
 from .serializers import NotificationSerializer, ProfileSerializer
 
 User = get_user_model()
+
+def public_user_count(request):
+    """Public, read-only page showing the current registered-user total."""
+    return render(request, "users.html", {"user_count": User.objects.count()})
+
 
 
 @api_view(["GET"])
