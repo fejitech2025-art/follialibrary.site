@@ -125,7 +125,6 @@
           :src="postMediaUrl"
           controls
           playsinline
-          muted
           preload="none"
           @play="handleVideoPlay"
           @pause="handleVideoPause"

@@ -4,9 +4,8 @@
       <section class="feed-column">
         <header class="feed-intro">
           <div>
-            <p class="feed-kicker">FOLLIA · DISCOVER ANYTHING</p>
            
-            
+    
           </div>
           <RouterLink to="/explore" class="explore-link">Explore <ArrowUpRight :size="16" /></RouterLink>
         </header>
