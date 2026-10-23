@@ -41,7 +41,7 @@
         <div class="push-settings-icon"><Bell :size="18" /></div>
         <div class="push-settings-copy">
           <strong>Hear about activity while you’re away</strong>
-          <p>Allow browser notifications for new follows, comments, replies, and Book Club activity. Your in-app alerts work either way.</p>
+          <p>Allow browser notifications for new follows, comments, replies, and messages. Your in-app alerts work either way.</p>
           <p v-if="pushError" class="push-error" role="alert">{{ pushError }}</p>
           <p v-else-if="pushStatus?.permission === 'denied'" class="push-note">Notifications are blocked in browser settings. Change this site's notification permission in your browser settings to enable them.</p>
           <p v-else-if="pushStatus?.reason === 'unconfigured'" class="push-note">This deployment has no background push configuration. Browser notifications can still appear while Follia is open.</p>
@@ -89,7 +89,7 @@
 
         <h2>You're all caught up</h2>
 
-        <p>Follows, post conversations and Book Club activity will show up here.</p>
+        <p>Follows, post conversations, and messages will show up here.</p>
 
         <RouterLink to="/explore" class="empty-action">
           Explore Follia
@@ -136,10 +136,7 @@
               View their profile
             </p>
 
-            <!-- Book Club hint -->
-            <p v-else-if="isBookClubNotification(notification)" class="notification-hint">
-              Open Book Club
-            </p>
+            <p v-else-if="notification.type === 'message'" class="notification-hint">Open conversation</p>
 
             <!-- Resource hint -->
             <p
@@ -234,14 +231,6 @@ const unreadCount = computed(() => {
   return notifications.value.filter((notification) => !notification.read).length
 })
 
-const bookClubNotificationTypes = [
-  'book_club_join',
-  'book_club_reply',
-  'book_club_admin',
-  'book_club_removed',
-  'book_club_pin',
-]
-
 /*
 |--------------------------------------------------------------------------
 | Initial load
@@ -312,16 +301,6 @@ async function loadNotifications() {
 
 function handleNotificationChange() {
   if (!loading.value) loadNotifications()
-}
-
-/*
-|--------------------------------------------------------------------------
-| Book Club notification check
-|--------------------------------------------------------------------------
-*/
-
-function isBookClubNotification(notification) {
-  return bookClubNotificationTypes.includes(notification?.type)
 }
 
 /*
@@ -401,19 +380,7 @@ async function handleNotificationClick(notification) {
     }
   }
 
-  /*
-   * Book Club notifications
-   */
-  if (isBookClubNotification(notification) && notification.book_club_id) {
-    router.push({
-      name: 'book-club',
-      params: {
-        id: notification.book_club_id,
-      },
-    })
-
-    return
-  }
+  if (notification.type === 'message') { router.push({ name:'messages' }); return }
 
   /*
    * Follow notification

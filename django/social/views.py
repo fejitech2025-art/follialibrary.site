@@ -3,6 +3,9 @@ from rest_framework.decorators import api_view, parser_classes, permission_class
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from django.http import FileResponse
+import re
+from PIL import Image, UnidentifiedImageError
 
 from accounts.models import Follow, notify
 from accounts.models import Profile
@@ -10,11 +13,9 @@ from accounts.serializers import ProfileSerializer
 from config.storage_backends import media_storage_available_for_upload
 from library.models import Resource, ResourceComment, ResourceCommentLike
 from library.serializers import ResourceSerializer
-from clubs.models import BookClub
-from clubs.serializers import BookClubSerializer
 from .models import ContentReport, Post, PostBookmark, PostComment, PostCommentLike, PostLike
 from .serializers import PostCommentSerializer, PostSerializer
-from config.watermark import WatermarkProcessingError, watermarked_download
+from ranking.service import award_comment, award_post, award_received_like, deactivate_event, undo_post
 
 MAX_POST_VIDEO_SIZE = 40 * 1024 * 1024
 
@@ -30,6 +31,13 @@ def visible_posts(request):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def feed(request):
+    try:
+        page = max(1, int(request.query_params.get("page", "1")))
+        page_size = min(30, max(1, int(request.query_params.get("page_size", "20"))))
+    except (TypeError, ValueError):
+        return Response({"detail": "Page and page_size must be positive integers."}, status=400)
+    offset = (page - 1) * page_size
+    fetch_limit = offset + page_size + 1
     items = []
     post_query = visible_posts(request)
     resource_query = Resource.objects.filter(status="published").select_related("author__profile").prefetch_related("likes", "comments", "bookmarks")
@@ -37,14 +45,19 @@ def feed(request):
         followed_ids = Follow.objects.filter(follower=request.user).values_list("following_id", flat=True)
         post_query = post_query.filter(Q(author_id__in=followed_ids) | Q(author=request.user))
         resource_query = resource_query.filter(Q(author_id__in=followed_ids) | Q(author=request.user))
-    for post in post_query[:50]:
+    post_query = post_query.order_by("-created_at", "-id")
+    resource_query = resource_query.order_by("-created_at", "-id")
+    for post in post_query[:fetch_limit]:
         data = PostSerializer(post, context={"request": request}).data
         items.append({"kind": "post", **data})
-    for resource in resource_query[:50]:
+    for resource in resource_query[:fetch_limit]:
         data = ResourceSerializer(resource, context={"request": request}).data
         items.append({"kind": "resource", **data, "author": data["profiles"], "body": resource.description})
-    items.sort(key=lambda item: item["created_at"], reverse=True)
-    return Response(items[:60])
+    items.sort(key=lambda item: (item["created_at"], item["kind"], item["id"]), reverse=True)
+    page_items = items[offset:offset + page_size]
+    has_more = len(items) > offset + page_size
+    return Response({"results": page_items, "page": page, "page_size": page_size,
+                     "has_more": has_more, "next_page": page + 1 if has_more else None})
 
 
 @api_view(["GET", "POST"])
@@ -59,7 +72,10 @@ def posts(request):
         return Response(PostSerializer(query[:60], many=True, context={"request": request}).data)
     if not request.user.is_authenticated:
         return Response({"detail": "Sign in to publish a post."}, status=401)
-    body = request.data.get("body", "").strip()
+    body = request.data.get("body", "")
+    if not isinstance(body, str):
+        return Response({"detail": "Post text must be plain text."}, status=400)
+    body = body.strip()
     uploads = request.FILES.getlist("media")
     if not uploads and request.FILES.get("media"):
         uploads = [request.FILES.get("media")]
@@ -67,6 +83,9 @@ def posts(request):
         return Response({"detail": "Add text or an image/video to your post."}, status=400)
     if len(body) > 5000:
         return Response({"detail": "Posts can be up to 5,000 characters."}, status=400)
+    hashtag_error = validate_post_hashtags(body)
+    if hashtag_error:
+        return Response({"detail": hashtag_error}, status=400)
     upload_error = validate_post_uploads(uploads)
     if upload_error:
         return Response({"detail": upload_error}, status=400)
@@ -81,25 +100,37 @@ def posts(request):
         post = Post.objects.create(author=request.user, body=body, media_type="image")
         for position, upload in enumerate(uploads):
             post.media_items.create(file=upload, media_type="image", position=position)
+    award_post(post)
     return Response(PostSerializer(post, context={"request": request}).data, status=201)
 
 
 def validate_post_uploads(uploads):
-    if any(not ((upload.content_type or "").startswith("image/") or uploaded_media_type(upload) == "video") for upload in uploads):
+    if any(not uploaded_media_type(upload) for upload in uploads):
         return "Post media must be an image or video."
     videos = [upload for upload in uploads if uploaded_media_type(upload) == "video"]
     if videos and len(uploads) > 1:
         return "Attach one video at a time. Videos cannot be combined with other media."
     if videos and videos[0].size > MAX_POST_VIDEO_SIZE:
         return "Videos must be 40 MB or smaller."
-    if any(uploaded_media_type(upload) != "video" and upload.size > 50 * 1024 * 1024 for upload in uploads):
-        return "Post images must be 50 MB or smaller."
+    for upload in uploads:
+        media_type = uploaded_media_type(upload)
+        if media_type == "video" and upload.size > MAX_POST_VIDEO_SIZE:
+            return "Videos must be 40 MB or smaller."
+        if media_type == "image":
+            if upload.size > 50 * 1024 * 1024:
+                return "Post images must be 50 MB or smaller."
+            try:
+                upload.seek(0)
+                with Image.open(upload) as image:
+                    image.verify()
+            except (OSError, UnidentifiedImageError, ValueError):
+                return "Post images must be valid image files."
+            finally:
+                upload.seek(0)
     return ""
 
 
 def uploaded_media_type(upload):
-    if (upload.content_type or "").lower().startswith("video/"):
-        return "video"
     try:
         header = upload.read(16)
         upload.seek(0)
@@ -107,7 +138,24 @@ def uploaded_media_type(upload):
         header = b""
     if header.startswith((b"\x1a\x45\xdf\xa3", b"OggS")) or (header[:4] == b"RIFF" and header[8:12] == b"AVI ") or header[4:8] == b"ftyp" or header.startswith(b"\x00\x00\x01\xba"):
         return "video"
-    return "image" if (upload.content_type or "").lower().startswith("image/") else ""
+    if (upload.content_type or "").lower().startswith("image/"):
+        try:
+            upload.seek(0)
+            with Image.open(upload) as image:
+                image.verify()
+            return "image"
+        except (OSError, UnidentifiedImageError, ValueError):
+            return ""
+        finally:
+            upload.seek(0)
+    return ""
+
+
+def validate_post_hashtags(body):
+    hashtags = re.findall(r"(?:^|\s)#([^\W\d_][\w]{0,63})", body, flags=re.UNICODE)
+    if len(hashtags) > 5:
+        return "Posts can include up to five hashtags."
+    return ""
 
 
 @api_view(["GET"])
@@ -132,6 +180,7 @@ def post_detail(request, post_id):
     if not request.user.is_authenticated or post.author_id != request.user.pk:
         return Response({"detail": "Only the creator can edit or remove this post."}, status=403)
     if request.method == "DELETE":
+        undo_post(post)
         post.delete()
         return Response(status=204)
     uploads = request.FILES.getlist("media")
@@ -143,6 +192,15 @@ def post_detail(request, post_id):
     if uploads and not media_storage_available_for_upload():
         return Response({"detail": "Cloudflare R2 media storage is not configured."}, status=503)
     serializer_data = request.data
+    if "body" in request.data:
+        body = request.data.get("body", "")
+        if not isinstance(body, str):
+            return Response({"detail": "Post text must be plain text."}, status=400)
+        if len(body) > 5000:
+            return Response({"detail": "Posts can be up to 5,000 characters."}, status=400)
+        hashtag_error = validate_post_hashtags(body)
+        if hashtag_error:
+            return Response({"detail": hashtag_error}, status=400)
     if len(uploads) > 1:
         serializer_data = request.data.copy()
         serializer_data.pop("media", None)
@@ -178,9 +236,12 @@ def post_like(request, post_id):
         like, created = PostLike.objects.get_or_create(user=request.user, post=post)
         if created:
             notify(post.author, request.user, "like", post_id=post.pk, event_key=f"post-like:{like.pk}")
+        if post.author_id != request.user.pk:
+            award_received_like(post.author, request.user, f"post-like:{request.user.pk}:{post.pk}")
         liked = True
     else:
         PostLike.objects.filter(user=request.user, post=post).delete()
+        deactivate_event(f"post-like:{request.user.pk}:{post.pk}")
         liked = False
     return Response({"liked": liked, "count": post.likes.count()})
 
@@ -204,14 +265,9 @@ def post_media_file(request, post_id, media_id=None):
         filename = item.file.name.rsplit("/", 1)[-1] if item else ""
     if not field:
         return Response({"detail": "Post media not found."}, status=404)
-    try:
-        media_type = item.media_type if media_id is not None and item else post.media_type
-        supplied_type = "video/mp4" if media_type == "video" else ""
-        return watermarked_download(field, filename, post.author.profile.username, supplied_type)
-    except WatermarkProcessingError as error:
-        return Response({"detail": str(error)}, status=503)
-    except Exception:
-        return Response({"detail": "This media could not be prepared for download."}, status=422)
+    media_type = item.media_type if media_id is not None and item else post.media_type
+    supplied_type = "video/mp4" if media_type == "video" else "application/octet-stream"
+    return FileResponse(field.open("rb"), as_attachment=True, filename=filename, content_type=supplied_type)
 
 
 @api_view(["POST", "DELETE"])
@@ -277,6 +333,7 @@ def post_comments(request, post_id):
         if not parent:
             return Response({"detail": "Comment to reply to was not found for this post."}, status=400)
     comment = serializer.save(user=request.user, post=post, parent=parent)
+    award_comment(comment, post.author, source="post")
     if parent:
         notify(
             parent.user,
@@ -364,14 +421,12 @@ def report_resource_comment(request, resource_id, comment_id):
 def search(request):
     query = request.query_params.get("q", "").strip()
     if not query:
-        return Response({"users": [], "posts": [], "resources": [], "clubs": []})
+        return Response({"users": [], "posts": [], "resources": []})
     users = Profile.objects.select_related("user").filter(Q(username__icontains=query) | Q(display_name__icontains=query) | Q(bio__icontains=query))[:12]
     posts_query = Post.objects.select_related("author__profile").filter(Q(body__icontains=query))[:20]
     resources_query = Resource.objects.filter(status="published").select_related("author__profile").filter(Q(title__icontains=query) | Q(description__icontains=query) | Q(category__icontains=query) | Q(language__icontains=query))[:20]
-    clubs_query = BookClub.objects.select_related("owner__profile").filter(Q(name__icontains=query) | Q(description__icontains=query))[:12]
     return Response({
         "users": ProfileSerializer(users, many=True, context={"request": request}).data,
         "posts": PostSerializer(posts_query, many=True, context={"request": request}).data,
         "resources": ResourceSerializer(resources_query, many=True, context={"request": request}).data,
-        "clubs": BookClubSerializer(clubs_query, many=True, context={"request": request}).data,
     })

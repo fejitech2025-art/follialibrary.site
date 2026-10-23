@@ -15,9 +15,7 @@ def notification_message(notification):
         "comment": f"{actor} commented on your content.",
         "comment_reply": f"{actor} replied to your comment.",
         "comment_like": f"{actor} liked your comment.",
-        "book_club_join": f"{actor} joined your Book Club.",
-        "book_club_reply": f"{actor} replied in your Book Club.",
-        "book_club_admin": f"{actor} updated your Book Club role.",
+        "message": f"{actor} sent you a message.",
     }
     return messages.get(notification.type, "You have a new Follia Library notification.")
 

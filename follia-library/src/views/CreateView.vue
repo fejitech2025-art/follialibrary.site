@@ -26,6 +26,28 @@
         </div>
         <label class="sr-only" for="post-body">Write a post</label>
         <textarea id="post-body" v-model="body" maxlength="5000" placeholder="What have you discovered lately?" rows="6"></textarea>
+        <div class="composer-hints">
+          <span>Emojis and up to five hashtags</span>
+          <span class="char-count" :class="{ 'hashtag-over-limit': hashtagCount > MAX_HASHTAGS }">{{ hashtagCount }}/{{ MAX_HASHTAGS }} hashtags</span>
+        </div>
+        <div v-if="hashtagCount > MAX_HASHTAGS" class="form-message error">Posts can include up to five hashtags. Remove {{ hashtagCount - MAX_HASHTAGS }} to continue.</div>
+        <section v-if="cameraOpen" class="camera-panel" aria-label="Camera capture">
+          <video ref="cameraVideo" autoplay playsinline muted aria-label="Live camera preview"></video>
+          <p v-if="cameraError" class="form-message error">{{ cameraError }}</p>
+          <div class="camera-actions">
+            <button v-if="!cameraRecording" type="button" @click="capturePhoto">Capture photo</button>
+            <button v-if="cameraMode === 'video' && !cameraRecording" type="button" class="trim-confirm" @click="startCameraRecording">Record video</button>
+            <button v-if="cameraRecording" type="button" class="trim-confirm" @click="stopCameraRecording">Stop recording {{ formatDuration(cameraRecordingSeconds) }}</button>
+            <button type="button" @click="closeCamera">Cancel</button>
+          </div>
+          <p v-if="cameraFallback" class="duration-label">Direct camera access is unavailable. Use a device camera picker instead:</p>
+          <div v-if="cameraFallback" class="camera-actions">
+            <label class="attach-button" for="camera-photo-fallback">Take photo</label>
+            <input id="camera-photo-fallback" type="file" accept="image/*" capture="environment" @change="chooseMedia" />
+            <label class="attach-button" for="camera-video-fallback">Record video</label>
+            <input id="camera-video-fallback" type="file" accept="video/*" capture="environment" @change="chooseMedia" />
+          </div>
+        </section>
         <div v-if="selectedMedia.length" class="media-preview-list">
           <div v-for="(entry, index) in selectedMedia" :key="entry.url" class="media-preview">
             <video v-if="entry.type === 'video'" :src="entry.url" controls playsinline />
@@ -66,9 +88,11 @@
           <div class="composer-tools">
             <label class="attach-button" for="post-media"><ImagePlus :size="19" /><span>Photos or video</span></label>
             <input id="post-media" ref="mediaInput" type="file" accept="image/*,video/*" multiple @change="chooseMedia" />
+            <button class="attach-button camera-button" type="button" @click="openCamera('photo')"><Camera :size="18" /><span>Camera</span></button>
+            <button class="attach-button camera-button" type="button" @click="openCamera('video')"><Video :size="18" /><span>Record</span></button>
             <span class="char-count">{{ body.length }}/5000</span>
           </div>
-          <button class="publish-button" type="submit" :disabled="publishing || videoProcessing || !!videoCandidate || (!body.trim() && !selectedMedia.length)">
+          <button class="publish-button" type="submit" :disabled="publishing || videoProcessing || !!videoCandidate || hashtagCount > MAX_HASHTAGS || (!body.trim() && !selectedMedia.length)">
             {{ publishing ? 'Sharing…' : 'Share post' }} <ArrowUpRight v-if="!publishing" :size="17" />
           </button>
         </div>
@@ -86,9 +110,9 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, ArrowUpRight, BookOpen, ImagePlus, MessageCircle, X } from 'lucide-vue-next'
+import { ArrowLeft, ArrowUpRight, BookOpen, Camera, ImagePlus, MessageCircle, Video, X } from 'lucide-vue-next'
 import MainLayout from '../layouts/MainLayout.vue'
 import ImageCropper from '../components/ImageCropper.vue'
 import UserAvatar from '../components/UserAvatar.vue'
@@ -100,6 +124,8 @@ const router = useRouter()
 const { user, initializeAuth } = useAuth()
 const mode = ref('post')
 const body = ref('')
+const MAX_HASHTAGS = 5
+const hashtagCount = computed(() => (body.value.match(/(?:^|\s)#[\p{L}][\p{L}\p{N}_]{0,63}/gu) || []).length)
 const selectedMedia = ref([])
 const mediaInput = ref(null)
 const cropFile = ref(null)
@@ -116,6 +142,19 @@ const videoProcessing = ref(false)
 const publishing = ref(false)
 const error = ref('')
 const profile = ref(null)
+const cameraOpen = ref(false)
+const cameraFallback = ref(false)
+const cameraError = ref('')
+const cameraMode = ref('photo')
+const cameraVideo = ref(null)
+const cameraRecording = ref(false)
+const cameraRecordingSeconds = ref(0)
+let cameraStream = null
+let cameraRecorder = null
+let cameraChunks = []
+let cameraRecordingStartedAt = 0
+let cameraTimer = null
+let cameraDiscarding = false
 const displayName = computed(() => profile.value?.display_name || profile.value?.username || user.value?.email || 'Your profile')
 const MAX_VIDEO_SIZE = 40 * 1024 * 1024
 const trimTimelineStyle = computed(() => ({
@@ -155,6 +194,122 @@ function chooseMedia(event) {
     showNextCrop()
   }
   event.target.value = ''
+}
+
+async function openCamera(mode) {
+  if (mode === 'video' && selectedMedia.value.length) {
+    error.value = 'Remove the selected images before recording a video.'
+    return
+  }
+  if (mode === 'photo' && (videoCandidate.value || selectedMedia.value.some((entry) => entry.type === 'video'))) {
+    error.value = 'Remove the selected video before capturing photos.'
+    return
+  }
+  error.value = ''
+  cameraMode.value = mode
+  cameraError.value = ''
+  cameraFallback.value = false
+  cameraOpen.value = true
+  if (!navigator.mediaDevices?.getUserMedia || (mode === 'video' && typeof MediaRecorder === 'undefined')) {
+    cameraFallback.value = true
+    cameraError.value = mode === 'video' ? 'In-app video recording is not supported here.' : 'In-app camera access is not supported here.'
+    return
+  }
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: mode === 'video',
+    })
+    await nextTick()
+    if (cameraVideo.value) cameraVideo.value.srcObject = cameraStream
+  } catch (err) {
+    cameraFallback.value = true
+    cameraError.value = err.name === 'NotAllowedError'
+      ? 'Camera permission was denied. Allow camera access or use the device camera picker below.'
+      : 'The camera could not be opened. Use the device camera picker below.'
+  }
+}
+
+function closeCamera() {
+  cameraDiscarding = true
+  if (cameraRecorder?.state === 'recording') cameraRecorder.stop()
+  cameraRecorder = null
+  cameraRecording.value = false
+  clearInterval(cameraTimer)
+  cameraTimer = null
+  for (const track of cameraStream?.getTracks?.() || []) track.stop()
+  cameraStream = null
+  if (cameraVideo.value) cameraVideo.value.srcObject = null
+  cameraOpen.value = false
+  cameraRecordingSeconds.value = 0
+  cameraChunks = []
+}
+
+async function capturePhoto() {
+  const video = cameraVideo.value
+  if (!video?.videoWidth || !video?.videoHeight) {
+    cameraError.value = 'Wait for the camera preview, then try again.'
+    return
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = video.videoWidth
+  canvas.height = video.videoHeight
+  canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height)
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92))
+  if (!blob) {
+    cameraError.value = 'The photo could not be captured. Please try again.'
+    return
+  }
+  const file = new File([blob], `follia-photo-${Date.now()}.jpg`, { type: 'image/jpeg', lastModified: Date.now() })
+  closeCamera()
+  cropQueue.value.push(file)
+  showNextCrop()
+}
+
+function startCameraRecording() {
+  const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type))
+  if (!cameraStream || !mimeType) {
+    cameraFallback.value = true
+    cameraError.value = 'This browser cannot record video in app. Use the device camera picker below.'
+    return
+  }
+  cameraDiscarding = false
+  cameraChunks = []
+  try {
+    cameraRecorder = new MediaRecorder(cameraStream, { mimeType })
+    cameraRecorder.ondataavailable = (event) => { if (event.data.size) cameraChunks.push(event.data) }
+    cameraRecorder.onerror = () => { cameraError.value = 'The video recording failed. Please try again.'; cameraRecording.value = false }
+    cameraRecorder.onstop = () => {
+      const wasDiscarded = cameraDiscarding
+      const blob = new Blob(cameraChunks, { type: mimeType.split(';')[0] })
+      cameraChunks = []
+      if (!wasDiscarded && blob.size) {
+        const file = new File([blob], `follia-video-${Date.now()}.webm`, { type: blob.type, lastModified: Date.now() })
+        closeCamera()
+        videoCandidate.value = file
+        candidateUrl.value = URL.createObjectURL(file)
+        videoDuration.value = 0
+        trimStart.value = 0
+        trimEnd.value = 0
+        thumbnailFrames.value = []
+      }
+    }
+    cameraRecorder.start(250)
+    cameraRecordingStartedAt = Date.now()
+    cameraRecording.value = true
+    cameraRecordingSeconds.value = 0
+    cameraTimer = setInterval(() => { cameraRecordingSeconds.value = Math.floor((Date.now() - cameraRecordingStartedAt) / 1000) }, 250)
+  } catch {
+    cameraFallback.value = true
+    cameraError.value = 'The camera could not start recording. Use the device camera picker below.'
+  }
+}
+
+function stopCameraRecording() {
+  if (cameraRecorder?.state === 'recording') cameraRecorder.stop()
+  cameraRecording.value = false
+  clearInterval(cameraTimer)
+  cameraTimer = null
 }
 
 function clearMedia() {
@@ -334,6 +489,7 @@ async function confirmVideo(trim) {
 }
 
 async function publishPost() {
+  if (hashtagCount.value > MAX_HASHTAGS) { error.value = 'Posts can include up to five hashtags.'; return }
   if (!body.value.trim() && !selectedMedia.value.length) return
   publishing.value = true
   error.value = ''
@@ -348,7 +504,7 @@ async function publishPost() {
   }
 }
 
-onBeforeUnmount(() => { clearMedia(); clearVideoCandidate() })
+onBeforeUnmount(() => { closeCamera(); clearMedia(); clearVideoCandidate() })
 </script>
 
 <style scoped>
@@ -365,6 +521,14 @@ onBeforeUnmount(() => { clearMedia(); clearVideoCandidate() })
 .create-switch strong { color:var(--text-main); font-size:13px; }
 .create-switch small { color:var(--text-secondary); font-size:11px; }
 .post-composer,.resource-choice { border:1px solid var(--border-color); border-radius:22px; background:var(--card-bg); box-shadow:0 8px 28px var(--shadow-color); }
+.composer-hints { display:flex; justify-content:space-between; gap:12px; padding:0 24px 8px; color:var(--text-tertiary); font-size:12px; }
+.hashtag-over-limit { color:#c63232; font-weight:750; }
+.camera-panel { display:grid; gap:12px; margin:0 24px 18px; padding:14px; border:1px solid var(--border-color); border-radius:18px; background:var(--card-soft); }
+.camera-panel > video { width:100%; max-height:420px; border-radius:14px; background:#000; object-fit:contain; }
+.camera-actions { display:flex; flex-wrap:wrap; align-items:center; gap:9px; }
+.camera-actions button { min-height:42px; padding:0 14px; border:1px solid var(--border-color); border-radius:12px; background:var(--card-bg); color:var(--text-main); font-weight:700; }
+.camera-actions .trim-confirm { background:var(--accent); color:#111; border-color:var(--accent); }
+.camera-button { padding:0; border:0; background:transparent; color:var(--text-secondary); }
 .post-composer { padding:22px; }
 .composer-top { display:flex; align-items:center; gap:12px; padding-bottom:18px; border-bottom:1px solid var(--border-soft); }
 .avatar { width:42px; height:42px; display:grid; place-items:center; border-radius:50%; background:var(--icon-bg); color:var(--text-main); font-weight:750; }

@@ -11,48 +11,22 @@
     <RouterLink to="/create" class="nav-create" aria-label="Create a post or upload a resource">
       <Plus :size="23" stroke-width="2.2" />
     </RouterLink>
-    <RouterLink to="/clubs" class="nav-item" :class="{ active: route.path.startsWith('/clubs') || route.path.startsWith('/book-club') }" aria-label="Book Clubs">
-      <UsersRound :size="21" stroke-width="1.8" />
-      <span>Book Clubs</span>
+    <RouterLink to="/ranks" class="nav-item" :class="{ active: route.path.startsWith('/ranks') }" aria-label="Ranks">
+      <Trophy :size="21" stroke-width="1.8" />
+      <span>Ranks</span>
     </RouterLink>
-    <RouterLink to="/notifications" class="nav-item" :class="{ active: route.path.startsWith('/notifications') }" :aria-label="unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'">
-      <span class="notification-icon">
-        <Bell :size="21" stroke-width="1.8" />
-        <span v-if="unreadCount > 0" class="notification-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
-      </span>
-      <span>Alerts</span>
+    <RouterLink to="/messages" class="nav-item" :class="{ active: route.path.startsWith('/messages') }" aria-label="Messages">
+      <MessageCircle :size="21" stroke-width="1.8" />
+      <span>Messages</span>
     </RouterLink>
   </nav>
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { Bell, Compass, Home, Plus, UsersRound } from 'lucide-vue-next'
-import { getUnreadNotificationCount } from '../services/notificationService'
+import { Compass, Home, MessageCircle, Plus, Trophy } from 'lucide-vue-next'
 
 const route = useRoute()
-const unreadCount = ref(0)
-let unreadTimer = null
-
-async function refreshUnreadCount() {
-  try {
-    unreadCount.value = await getUnreadNotificationCount()
-  } catch {
-    unreadCount.value = 0
-  }
-}
-
-onMounted(() => {
-  refreshUnreadCount()
-  unreadTimer = window.setInterval(refreshUnreadCount, 15000)
-  window.addEventListener('follia:notification-change', refreshUnreadCount)
-})
-
-onBeforeUnmount(() => {
-  if (unreadTimer) window.clearInterval(unreadTimer)
-  window.removeEventListener('follia:notification-change', refreshUnreadCount)
-})
 </script>
 
 <style scoped>
@@ -95,8 +69,6 @@ onBeforeUnmount(() => {
   background: var(--hover-bg);
 }
 .nav-item:hover { color: var(--text-main); }
-.notification-icon { position:relative; display:grid; place-items:center; }
-.notification-badge { position:absolute; top:-7px; right:-11px; min-width:16px; height:16px; display:grid; place-items:center; padding:0 4px; border:2px solid var(--card-bg); border-radius:999px; background:#d83232; color:#fff; font-size:8px; font-weight:800; line-height:1; }
 .nav-create {
   flex: 0 0 48px;
   height: 48px;

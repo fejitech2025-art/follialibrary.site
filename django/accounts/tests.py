@@ -59,18 +59,16 @@ class NotificationAndPushApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(self.client.get("/api/auth/me/").data["user"])
 
-    def test_profile_likes_count_includes_posts_and_resources(self):
-        from library.models import Resource, ResourceLike
-        from social.models import Post, PostLike
+    def test_profile_exposes_the_real_rank_without_changing_follow_counts(self):
+        from ranking.service import record_event
 
-        resource = Resource.objects.create(author=self.reader, title="A resource")
-        post = Post.objects.create(author=self.reader, body="A post")
-        ResourceLike.objects.create(user=self.other, resource=resource)
-        PostLike.objects.create(user=self.other, post=post)
-
+        record_event(self.reader, "post_published", "test-post-rank", actor=self.reader)
         response = self.client.get(f"/api/users/{self.reader.pk}/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["like_count"], 2)
+        self.assertEqual(response.data["rank_position"], 1)
+        self.assertEqual(response.data["rank_score"], 10)
+        self.assertEqual(response.data["follower_count"], 0)
+        self.assertEqual(response.data["following_count"], 0)
 
 
 class FollowNotificationTests(TestCase):

@@ -203,7 +203,7 @@
                 Follia Library is a platform for discovering, sharing, saving, and
                 discussing educational resources and other permitted content.
                 Features may include profiles, posts, comments, likes, connections,
-                bookmarks, notifications, and book clubs.
+                bookmarks, notifications, private messages, and rankings.
               </p>
 
               <p>
@@ -326,7 +326,7 @@
               <p>
                 Depending on the features you use, information may include account
                 details, profile information, uploaded content, comments,
-                connections, bookmarks, notifications, and technical or usage
+                connections, bookmarks, notifications, private messages, and technical or usage
                 information.
               </p>
 

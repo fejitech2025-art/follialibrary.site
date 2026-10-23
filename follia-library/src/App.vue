@@ -10,19 +10,40 @@ import {
   getNotificationMessage,
   subscribeToMyNotifications,
 } from './services/notificationService'
+import { subscribeUserEvents } from './services/userEvents'
 
 const { user, initializeAuth } = useAuth()
 let notificationSubscription = null
 let notificationWatcherId = 0
 let seenNotificationIds = new Set()
+let liveEventsSubscription = null
 
 watch(() => user.value?.id, (userId) => {
   stopNotificationWatcher()
   if (userId) startNotificationWatcher()
 }, { immediate: true })
 
+watch(() => user.value?.id, (userId) => {
+  liveEventsSubscription?.unsubscribe()
+  liveEventsSubscription = null
+  if (!userId) return
+  liveEventsSubscription = subscribeUserEvents((event) => {
+    if (event.type === 'notification_count') {
+      window.dispatchEvent(new CustomEvent('follia:notification-count', { detail: event.count }))
+    }
+    if (event.type === 'notification_new') {
+      window.dispatchEvent(new CustomEvent('follia:notification-count', { detail: event.count }))
+      const notification = event.notification
+      if (notification?.id && !seenNotificationIds.has(notification.id)) {
+        seenNotificationIds.add(notification.id)
+        showBrowserNotification(notification)
+      }
+    }
+  })
+}, { immediate: true })
+
 onMounted(() => initializeAuth())
-onBeforeUnmount(stopNotificationWatcher)
+onBeforeUnmount(() => { stopNotificationWatcher(); liveEventsSubscription?.unsubscribe() })
 
 function stopNotificationWatcher() {
   notificationWatcherId += 1
@@ -97,7 +118,7 @@ function getNotificationTargetUrl(notification) {
   }
   if (notification.post_id) return `/post/${notification.post_id}`
   if (notification.resource_id) return `/resource/${notification.resource_id}`
-  if (notification.book_club_id) return `/book-club/${notification.book_club_id}`
+  if (notification.type === 'message') return '/messages'
   if (notification.actor_id) return `/profile/${notification.actor_id}`
   return '/notifications'
 }

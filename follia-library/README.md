@@ -1,6 +1,6 @@
 # Follia
 
-Follia is a social discovery platform with a strong library and Book Club experience: **Discover anything.**
+Follia is a social reading and knowledge-sharing platform: **Discover anything.**
 
 The existing Vue 3 application is in this folder. Its data/auth layer now talks to the Django REST Framework API in the sibling `django/` folder. The backend uses SQLite for local development. The PWA configuration, install prompt, composable, manifest and assets remain in place.
 
@@ -44,10 +44,11 @@ Frontend packages already in the project: Vue 3, Vue Router, Pinia, Lucide Vue N
 ## Product areas
 
 - Home is a mixed social feed of posts and Follia resources, with For you and Following views.
-- Explore searches people, posts, resources and Book Clubs.
+- Explore searches people, posts and resources.
 - The centered create action lets people create a post or upload a separate library resource.
-- Profiles show posts, resources, followers and following. Profile actions use Follow and Following.
-- Book Clubs keep member roles, resource links, chat, replies, pinning and moderation.
-- Book Club chat writes use the DRF API and message updates are delivered over Django Channels WebSockets. The local channel layer is in memory for a single development server.
+- Profiles show posts, resources, followers, following and their rank. Other creators can be messaged privately.
+- Ranks uses backend activity events, with daily and overall leaderboards.
+- Messages supports private text and voice messages, stickers, shared posts, read receipts, typing indicators, blocking and reporting.
+- The backend delivers live message and rank events over authenticated Django Channels WebSockets. The local channel layer is in memory for a single development server; configure Redis for multi-worker deployments.
 
 Existing Supabase production data has not been modified or imported. The new SQLite database starts empty; account/resource migration is a separate task.

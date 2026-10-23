@@ -14,6 +14,13 @@
 
       <!-- Profile: Always at the top right -->
       <div class="header-actions">
+        <RouterLink to="/messages" class="header-icon-link" aria-label="Messages">
+          <MessageCircle :size="20" />
+        </RouterLink>
+        <RouterLink to="/notifications" class="header-icon-link notification-link" :aria-label="unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'">
+          <Bell :size="20" />
+          <span v-if="unreadCount" class="header-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+        </RouterLink>
         <RouterLink to="/account" class="profile-button">
           <div class="profile-avatar">
             <UserAvatar
@@ -31,17 +38,23 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { Bell, MessageCircle } from 'lucide-vue-next'
 
 import BrandLogo from './BrandLogo.vue'
 import UserAvatar from './UserAvatar.vue'
 import { useAuth } from '../composables/useAuth'
 import { getMyProfile } from '../services/profileService'
+import { getUnreadNotificationCount } from '../services/notificationService'
+import { subscribeUserEvents } from '../services/userEvents'
 
 const { user: authUser, initializeAuth } = useAuth()
 
 const user = ref(null)
 const profile = ref(null)
+const unreadCount = ref(0)
+let unreadTimer = null
+let liveEvents = null
 
 /*
 |--------------------------------------------------------------------------
@@ -72,8 +85,16 @@ async function loadUser() {
 
     if (user.value) {
       profile.value = await getMyProfile()
+      await refreshUnreadCount()
+      liveEvents?.unsubscribe()
+      liveEvents = subscribeUserEvents((event) => {
+        if (event.type === 'notification_count' || event.type === 'notification_new') {
+          unreadCount.value = Number(event.count || 0)
+        }
+      })
     } else {
       profile.value = null
+      unreadCount.value = 0
     }
   } catch (error) {
     console.error('Profile loading error:', error)
@@ -81,6 +102,22 @@ async function loadUser() {
 }
 
 onMounted(loadUser)
+onMounted(() => {
+  unreadTimer = window.setInterval(refreshUnreadCount, 45000)
+  window.addEventListener('follia:notification-change', refreshUnreadCount)
+  window.addEventListener('follia:notification-count', handleCountEvent)
+})
+onBeforeUnmount(() => {
+  if (unreadTimer) window.clearInterval(unreadTimer)
+  window.removeEventListener('follia:notification-change', refreshUnreadCount)
+  window.removeEventListener('follia:notification-count', handleCountEvent)
+  liveEvents?.unsubscribe()
+})
+
+async function refreshUnreadCount() {
+  try { unreadCount.value = await getUnreadNotificationCount() } catch {}
+}
+function handleCountEvent(event) { unreadCount.value = Number(event.detail || 0) }
 </script>
 
 <style scoped>
@@ -144,7 +181,13 @@ onMounted(loadUser)
 
   flex: 0 0 auto;
   margin-left: auto;
+  gap: 9px;
 }
+
+.header-icon-link { position:relative; width:42px; height:42px; display:grid; place-items:center; border-radius:13px; color:var(--text-secondary); transition:background .18s,color .18s,transform .18s; }
+.header-icon-link:hover { background:var(--hover-bg); color:var(--text-main); transform:translateY(-1px); }
+.header-badge { position:absolute; top:1px; right:0; min-width:17px; height:17px; padding:0 4px; display:grid; place-items:center; border:2px solid var(--card-bg); border-radius:999px; background:var(--accent); color:#101010; font-size:9px; font-weight:850; line-height:1; animation:badge-pop .22s ease-out; }
+@keyframes badge-pop { from { transform:scale(.7); opacity:.6 } to { transform:scale(1); opacity:1 } }
 
 .profile-button {
   display: flex;
@@ -255,5 +298,7 @@ onMounted(loadUser)
   .profile-label {
     font-size: 10px;
   }
+  .header-actions { gap:5px; }
+  .header-icon-link { width:38px; height:38px; }
 }
 </style>

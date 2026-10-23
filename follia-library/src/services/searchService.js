@@ -13,7 +13,7 @@ export async function searchPublishers(query) {
 }
 
 export async function searchLibrary(query) {
-  if (!query?.trim()) return { resources: [], publishers: [], users: [], posts: [], clubs: [] }
+  if (!query?.trim()) return { resources: [], publishers: [], users: [], posts: [] }
   const data = await api('/api/search/?q=' + encodeURIComponent(query.trim()))
   return { ...data, publishers: data.users || [] }
 }

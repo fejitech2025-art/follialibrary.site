@@ -15,10 +15,15 @@ python manage.py runserver
 ```
 
 The API runs at `http://localhost:8000`. Uploaded files are stored under `django/media/`.
+`daphne` is installed before Django's static-files app so the development
+`runserver` supports the ASGI WebSocket routes. Production must start an ASGI
+server against `config.asgi:application` (for example,
+`daphne -b 0.0.0.0 -p 8000 config.asgi:application`) and route WebSocket
+connections to that process.
 
 ## Media storage
 
-Profile avatars, Book Club avatars, resource covers, and post images/videos use
+Profile avatars, resource covers, post images/videos, and private voice notes use
 the shared media storage configured in `config/settings.py`. With the R2
 variables below set, Django uploads those files to Cloudflare R2. Without R2
 credentials, local debug mode uses `django/media/`; production media uploads
@@ -123,9 +128,13 @@ The current settings use SMTP for email. Configure `EMAIL_HOST`, `EMAIL_PORT`, `
 - `accounts`: Profile, Follow, Notification, PushSubscription, and profile endpoints.
 - `library`: Resource, ResourceLike, ResourceBookmark, ResourceComment, ResourceCommentLike.
 - `social`: Post, PostMedia, PostLike, PostBookmark, PostComment, PostCommentLike, ContentReport.
-- `clubs`: BookClub, BookClubMembership, BookClubResource, BookClubMessage.
+- `ranking`: idempotent rank activity ledger and leaderboard service.
+- `messaging`: private one-to-one conversations, messages, blocks, and reports.
+- `clubs` remains as a migrations-only app to safely remove its old tables when
+  existing databases apply migration `0002`.
 
-Book Club resources are join records. Removing a `BookClubResource` link leaves the library resource untouched.
+The club migration drops only the club-specific tables. Library resources,
+users, follows, posts, and existing media objects remain untouched.
 
 ## API routes
 
@@ -133,25 +142,40 @@ Book Club resources are join records. Removing a `BookClubResource` link leaves 
 - `/accounts/google/login/` and the Google OAuth callback handled by django-allauth
 - `/api/me/profile/`, `/api/users/`, `/api/users/<id>/`, `/api/users/<id>/follow/`, `/followers/`, `/following/`
 - `/api/feed/`, `/api/posts/`, `/api/posts/<id>/`, `/like/`, `/save/`, `/comments/`, `/report/`
-- `/api/posts/<id>/file/` and `/api/posts/<id>/media/<media_id>/file/` for watermarked media downloads
+- `/api/posts/<id>/file/` and `/api/posts/<id>/media/<media_id>/file/` for original media downloads
 - `/api/resources/`, `/api/resources/<id>/`, `/like/`, `/save/`, `/comments/`, `/preview/`, `/file/`, `/report/`, `/api/bookmarks/`
 - `/api/search/?q=...`, `/api/notifications/`, `/api/notifications/unread-count/`, `/api/notifications/<id>/read/`
 - `/api/push/public-key/`, `/api/push/subscriptions/`
-- `/api/clubs/`, `/api/clubs/<id>/`, `/membership/`, `/join/`, `/messages/`, `/resources/`, `/members/<id>/`
-- `ws://localhost:8000/ws/clubs/<club_id>/` for authenticated Book Club message delivery
+- `/api/ranks/?period=daily|overall`
+- `/api/messages/conversations/`, `/api/messages/conversations/<id>/messages/`, `/read/`, `/api/messages/blocks/`, `/api/messages/<id>/report/`
+- `/ws/messages/` for authenticated private-message events and typing indicators
+- `/ws/ranks/` for authenticated leaderboard change notifications
 
-## Realtime chat
+## Ranking and direct messaging
 
-HTTP endpoints create, delete, and pin group messages. Django Channels broadcasts those changes to the authenticated club's WebSocket group. The development channel layer is in memory, which keeps local setup small and is suitable for one Django process. Use a shared channel layer before running multiple app processes in production.
+Rank points are written by backend services with unique activity keys. Defaults
+award points for publishing a post, publishing a resource, receiving genuine
+likes, and writing longer comments. Comments and likes have daily anti-abuse
+limits; self-interactions do not count. Point weights and limits can be changed
+with the `RANK_*` environment variables.
+Authenticated direct-message sends default to 60 per minute per user and message
+reports to 10 per hour; tune these with `DM_SEND_RATE` and `DM_REPORT_RATE`.
+
+Direct messages are stored in the database. WebSocket connections use the
+authenticated Django session and verify each conversation participant before
+accepting typing events. Message history and voice-note files are checked again
+on every HTTP request. Voice notes stream through a participant-only endpoint.
+
+Without `REDIS_URL`, Channels uses its in-memory layer and live events work only
+within one backend process. Configure `REDIS_URL` for multi-worker or
+multi-instance production deployments. The frontend reconnects and polls for
+message/rank updates if a WebSocket is temporarily unavailable.
 
 ## Checks and migrations
 
-Set `FRONTEND_URL` to the deployed Follia Library website origin. Watermark links use
-`FOLLIA_PUBLIC_URL` when set and otherwise use `FRONTEND_URL`. Install the Python
-dependencies in `requirements.txt` for image and PDF watermarking. Video downloads
-also require FFmpeg on the Django host; set `FFMPEG_BINARY` if its executable is not
-on `PATH`. Video watermarking runs when a download is requested and uses temporary
-files that are removed after the response finishes.
+Set `FRONTEND_URL` to the deployed Follia Library website origin. The download
+routes return the stored originals after applying the existing access checks.
+No watermark processing or temporary media transformation is used.
 
 ```powershell
 python manage.py check
@@ -159,4 +183,5 @@ python manage.py makemigrations
 python manage.py migrate
 ```
 
-The project intentionally has no direct-message endpoints, no Redis, and no production data import.
+The repository does not include production credentials or deploy-time Redis
+configuration. Set `REDIS_URL` on multi-worker deployments to share live events.

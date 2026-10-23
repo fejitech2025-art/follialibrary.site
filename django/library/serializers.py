@@ -44,8 +44,8 @@ class ResourceSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        # Keep storage URLs private; `file` and `file_url` both use the access
-        # checked, watermarked download view. Previews use the separate route.
+        # Keep storage URLs private; `file` and `file_url` use the access-checked
+        # download view. Previews use the separate route.
         data["file"] = data.get("file_url") or None
         return data
 

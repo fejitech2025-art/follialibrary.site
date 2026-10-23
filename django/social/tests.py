@@ -4,7 +4,9 @@ from django.test import TestCase
 from django.test.utils import override_settings
 from rest_framework.test import APIClient
 import tempfile
+from io import BytesIO
 from types import SimpleNamespace
+from PIL import Image
 
 from accounts.models import Notification, Profile
 from .models import ContentReport, Post, PostComment, PostCommentLike, PostMedia
@@ -85,24 +87,77 @@ class PostMediaAndEngagementApiTests(TestCase):
         self.client.force_authenticate(self.reader)
 
     def test_video_limit_accepts_40_mib_and_rejects_one_byte_over(self):
-        accepted = SimpleNamespace(content_type="video/mp4", size=MAX_POST_VIDEO_SIZE)
+        accepted = SimpleNamespace(content_type="video/mp4", size=MAX_POST_VIDEO_SIZE,
+                                   read=lambda count: b"\x00\x00\x00\x18ftypmp42",
+                                   seek=lambda position: None)
         self.assertEqual(validate_post_uploads([accepted]), "")
 
-        accepted_upload = SimpleUploadedFile("clip.mp4", b"x", content_type="video/mp4")
+        accepted_upload = SimpleUploadedFile("clip.mp4", b"\x00\x00\x00\x18ftypmp42", content_type="video/mp4")
         response = self.client.post("/api/posts/", {"body": "Trimmed clip", "media": accepted_upload}, format="multipart")
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["media_type"], "video")
 
-        oversized = SimpleNamespace(content_type="video/mp4", size=MAX_POST_VIDEO_SIZE + 1)
+        oversized = SimpleNamespace(content_type="video/mp4", size=MAX_POST_VIDEO_SIZE + 1,
+                                     read=lambda count: b"\x00\x00\x00\x18ftypmp42",
+                                     seek=lambda position: None)
         self.assertEqual(validate_post_uploads([oversized]), "Videos must be 40 MB or smaller.")
 
     def test_multiple_images_are_saved_as_separate_post_media(self):
-        first = SimpleUploadedFile("first.png", b"first", content_type="image/png")
-        second = SimpleUploadedFile("second.png", b"second", content_type="image/png")
+        def png_bytes(color):
+            buffer = BytesIO()
+            Image.new("RGB", (2, 2), color).save(buffer, format="PNG")
+            return buffer.getvalue()
+
+        first = SimpleUploadedFile("first.png", png_bytes("red"), content_type="image/png")
+        second = SimpleUploadedFile("second.png", png_bytes("blue"), content_type="image/png")
         response = self.client.post("/api/posts/", {"body": "Two images #weekend", "media": [first, second]}, format="multipart")
         self.assertEqual(response.status_code, 201)
         self.assertEqual(len(response.data["media_items"]), 2)
         self.assertEqual(PostMedia.objects.filter(post_id=response.data["id"]).count(), 2)
+
+    def test_like_and_comment_contracts_accept_expected_requests_and_persist(self):
+        like_url = f"/api/posts/{self.post.pk}/like/"
+        first = self.client.post(like_url)
+        duplicate = self.client.post(like_url)
+        self.assertEqual(first.status_code, 200, first.data)
+        self.assertEqual(duplicate.data, {"liked": True, "count": 1})
+        removed = self.client.delete(like_url)
+        self.assertEqual(removed.data, {"liked": False, "count": 0})
+
+        comment_url = f"/api/posts/{self.post.pk}/comments/"
+        created = self.client.post(comment_url, {"content": "A useful comment from the community."}, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+        listed = self.client.get(comment_url)
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.data[0]["content"], "A useful comment from the community.")
+
+        invalid = self.client.post(comment_url, {"content": "   "}, format="json")
+        self.assertEqual(invalid.status_code, 400)
+
+    def test_like_and_comment_requests_work_with_session_auth_and_csrf_enforced(self):
+        client = APIClient(enforce_csrf_checks=True)
+        client.force_login(self.reader)
+        csrf_response = client.get("/api/auth/csrf/")
+        csrf_token = csrf_response.data["csrfToken"]
+
+        liked = client.post(f"/api/posts/{self.post.pk}/like/", HTTP_X_CSRFTOKEN=csrf_token)
+        commented = client.post(
+            f"/api/posts/{self.post.pk}/comments/",
+            {"content": "A session authenticated comment."},
+            format="json",
+            HTTP_X_CSRFTOKEN=csrf_token,
+        )
+        self.assertEqual(liked.status_code, 200, liked.data)
+        self.assertEqual(commented.status_code, 201, commented.data)
+
+    def test_post_hashtag_limit_is_enforced_on_create_and_edit(self):
+        tags = "#one #two #three #four #five #six"
+        created = self.client.post("/api/posts/", {"body": tags}, format="json")
+        self.assertEqual(created.status_code, 400)
+        self.assertIn("five", created.data["detail"])
+        self.client.force_authenticate(self.author)
+        edit = self.client.patch(f"/api/posts/{self.post.pk}/", {"body": tags}, format="json")
+        self.assertEqual(edit.status_code, 400)
 
     def test_comment_likes_are_unique_and_notify_only_the_comment_author(self):
         comment = PostComment.objects.create(user=self.author, post=self.post, content="Read this")

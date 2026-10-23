@@ -11,7 +11,7 @@ from accounts.models import notify
 from config.storage_backends import media_storage_available_for_upload
 from .models import Resource, ResourceBookmark, ResourceComment, ResourceCommentLike, ResourceLike
 from .serializers import ResourceCommentSerializer, ResourceSerializer
-from config.watermark import WatermarkProcessingError, watermarked_download
+from ranking.service import award_comment, award_received_like, award_resource, deactivate_event, undo_resource
 
 
 def find_resource(resource_id, request):
@@ -60,6 +60,8 @@ def resources(request):
         resource.file_name = resource.file.name.rsplit("/", 1)[-1]
         resource.file_type = request.FILES.get("file").content_type if request.FILES.get("file") else ""
         resource.save(update_fields=["file_name", "file_type"])
+    if resource.status == "published":
+        award_resource(resource)
     return Response(ResourceSerializer(resource, context={"request": request}).data, status=201)
 
 
@@ -75,6 +77,7 @@ def resource_detail(request, resource_id):
     if not request.user.is_authenticated or resource.author_id != request.user.pk:
         return Response({"detail": "Only the creator can edit this resource."}, status=403)
     if request.method == "DELETE":
+        undo_resource(resource)
         if resource.file:
             resource.file.delete(save=False)
         if resource.cover:
@@ -108,9 +111,12 @@ def resource_like(request, resource_id):
         like, created = ResourceLike.objects.get_or_create(user=request.user, resource=resource)
         if created:
             notify(resource.author, request.user, "like", resource_id=resource.pk, event_key=f"resource-like:{like.pk}")
+        if resource.author_id != request.user.pk:
+            award_received_like(resource.author, request.user, f"resource-like:{request.user.pk}:{resource.pk}")
         liked = True
     else:
         ResourceLike.objects.filter(user=request.user, resource=resource).delete()
+        deactivate_event(f"resource-like:{request.user.pk}:{resource.pk}")
         liked = False
     return Response({"liked": liked, "count": resource.likes.count()})
 
@@ -154,6 +160,7 @@ def resource_comments(request, resource_id):
         if not parent:
             return Response({"detail": "Comment to reply to was not found for this resource."}, status=400)
     comment = serializer.save(user=request.user, resource=resource, parent=parent)
+    award_comment(comment, resource.author, source="resource")
     if parent:
         notify(
             parent.user,
@@ -216,12 +223,8 @@ def resource_file(request, resource_id):
     if not resource.is_free and (not request.user.is_authenticated or request.user != resource.author):
         return Response({"detail": "This resource is not available for free download."}, status=403)
     filename = resource.file_name or resource.file.name.rsplit("/", 1)[-1]
-    try:
-        return watermarked_download(resource.file, filename, resource.author.profile.username, resource.file_type)
-    except WatermarkProcessingError as error:
-        return Response({"detail": str(error)}, status=503)
-    except Exception:
-        return Response({"detail": "This resource could not be prepared for download."}, status=422)
+    return FileResponse(resource.file.open("rb"), as_attachment=True, filename=filename,
+                        content_type=resource.file_type or "application/octet-stream")
 
 
 @api_view(["GET"])

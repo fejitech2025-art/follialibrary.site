@@ -1,7 +1,8 @@
 import { api } from './api'
 
-export async function getFeed(feed = 'for-you') {
-  return api('/api/feed/?tab=' + encodeURIComponent(feed))
+export async function getFeed(feed = 'for-you', page = 1, pageSize = 20) {
+  const query = new URLSearchParams({ tab: feed, page: String(page), page_size: String(pageSize) })
+  return api('/api/feed/?' + query.toString())
 }
 
 export async function getPosts(params = {}) {

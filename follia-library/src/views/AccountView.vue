@@ -44,7 +44,7 @@
             <div class="profile-stats">
               <button type="button" @click="activeTab = 'Followers'"><Users :size="16" /><strong>{{ followerCount }}</strong><span>Followers</span></button>
               <button type="button" @click="activeTab = 'Following'"><UserRound :size="16" /><strong>{{ followingCount }}</strong><span>Following</span></button>
-              <span class="profile-stat-item"><Heart :size="16" /><strong>{{ profile.like_count || 0 }}</strong><span>Likes</span></span>
+              <span class="profile-stat-item rank-stat"><Trophy :size="16" /><strong>{{ profile.rank_position ? `#${profile.rank_position}` : '—' }}</strong><span>Rank</span></span>
             </div>
           </div>
         </div>
@@ -383,7 +383,7 @@ import {
   Bookmark,
   BookOpen,
   LoaderCircle,
-  Heart,
+  Trophy,
   MessageCircle,
   Pencil,
   Trash2,
@@ -1229,29 +1229,38 @@ onMounted(() => {
 
   .profile-hero {
     flex-direction: column;
+    align-items: center;
     padding: 22px;
     border-radius: 22px;
+    text-align: center;
   }
 
   .profile-avatar-large {
     width: 82px;
     height: 82px;
     flex-basis: 82px;
-    border-radius: 23px;
+    border-radius: 50%;
     font-size: 24px;
   }
 
   .profile-main {
     width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
   }
 
   .profile-title-row {
-    align-items: flex-start;
+    align-items: center;
     flex-direction: column;
   }
 
+  .profile-bio { max-width: 520px; margin-top: 13px; }
+
   .profile-stats {
-    gap: 18px;
+    width: 100%;
+    justify-content: space-around;
+    gap: 8px;
   }
 
   .profile-stats button,

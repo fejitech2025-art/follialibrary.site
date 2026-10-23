@@ -45,9 +45,7 @@ class Notification(models.Model):
         ("comment", "Comment"),
         ("comment_reply", "Comment reply"),
         ("comment_like", "Comment like"),
-        ("book_club_join", "Book Club activity"),
-        ("book_club_reply", "Book Club reply"),
-        ("book_club_admin", "Book Club role"),
+        ("message", "Message"),
     ]
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications")
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sent_notifications")
@@ -55,7 +53,6 @@ class Notification(models.Model):
     post_id = models.PositiveBigIntegerField(null=True, blank=True)
     resource_id = models.PositiveBigIntegerField(null=True, blank=True)
     comment_id = models.PositiveBigIntegerField(null=True, blank=True)
-    book_club_id = models.PositiveBigIntegerField(null=True, blank=True)
     event_key = models.CharField(max_length=150, null=True, blank=True)
     read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -101,7 +98,6 @@ def notify(
     post_id=None,
     resource_id=None,
     comment_id=None,
-    book_club_id=None,
     event_key=None,
 ):
     if not recipient or not actor or recipient.pk == actor.pk:
@@ -112,7 +108,6 @@ def notify(
         "post_id": post_id,
         "resource_id": resource_id,
         "comment_id": comment_id,
-        "book_club_id": book_club_id,
     }
     if event_key:
         notification, created = Notification.objects.get_or_create(
@@ -135,6 +130,34 @@ def notify(
 
 
 def _dispatch_push(notification_id):
+    notification = Notification.objects.select_related("recipient", "actor__profile").filter(pk=notification_id).first()
+    if notification:
+        try:
+            from messaging.realtime import send_user_event
+            profile = getattr(notification.actor, "profile", None)
+            send_user_event(notification.recipient_id, {
+                "type": "notification_new",
+                "notification": {
+                    "id": notification.pk,
+                    "actor_id": notification.actor_id,
+                    "actor": {
+                        "id": notification.actor_id,
+                        "user_id": notification.actor_id,
+                        "username": profile.username if profile else notification.actor.username,
+                        "display_name": (profile.display_name or profile.username) if profile else notification.actor.username,
+                        "avatar_url": profile.avatar_url if profile else "",
+                    },
+                    "type": notification.type,
+                    "post_id": notification.post_id,
+                    "resource_id": notification.resource_id,
+                    "comment_id": notification.comment_id,
+                    "read": notification.read,
+                    "created_at": notification.created_at.isoformat(),
+                },
+                "count": Notification.objects.filter(recipient_id=notification.recipient_id, read=False).count(),
+            })
+        except Exception:
+            pass
     from .push import send_notification_push
 
     send_notification_push(notification_id)

@@ -87,7 +87,7 @@
               <p>
                 Follia Library is a platform for discovering, sharing, saving, and discussing
                 educational resources and other permitted content. Features may include profiles,
-                posts, comments, likes, connections, bookmarks, notifications, and book clubs.
+                posts, comments, likes, connections, bookmarks, notifications, messages, and ranks.
               </p>
 
               <p>

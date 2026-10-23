@@ -29,7 +29,7 @@ User = get_user_model()
 
 def public_user_count(request):
     """Public, read-only page showing the current registered-user total."""
-    return render(request, "users.html", {"user_count": User.objects.count()})
+    return render(request, "user.html", {"user_count": User.objects.count()})
 
 
 
@@ -278,6 +278,8 @@ def notification_read(request, notification_id):
         return Response({"detail": "Notification not found."}, status=404)
     notification.read = True
     notification.save(update_fields=["read"])
+    from messaging.realtime import send_user_event
+    send_user_event(request.user.pk, {"type": "notification_count", "count": Notification.objects.filter(recipient=request.user, read=False).count()})
     return Response({"read": True})
 
 
@@ -285,6 +287,8 @@ def notification_read(request, notification_id):
 @permission_classes([IsAuthenticated])
 def notification_read_all(request):
     Notification.objects.filter(recipient=request.user, read=False).update(read=True)
+    from messaging.realtime import send_user_event
+    send_user_event(request.user.pk, {"type": "notification_count", "count": 0})
     return Response({"read": True})
 
 

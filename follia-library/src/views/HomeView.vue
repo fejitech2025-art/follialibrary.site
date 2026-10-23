@@ -47,7 +47,10 @@
               </div>
             </section>
           </template>
-          <button class="load-more" @click="router.push('/explore')">Keep discovering <ArrowDown :size="16" /></button>
+          <div ref="feedSentinel" class="feed-sentinel" aria-hidden="true"></div>
+          <div v-if="loadingMore" class="feed-more-loading" role="status"><i></i><span>Finding more ideas...</span></div>
+          <div v-else-if="loadMoreError" class="feed-more-error" role="status"><span>{{ loadMoreError }}</span><button @click="loadMore">Try again</button></div>
+          <p v-else-if="!hasMore" class="feed-end">You’re all caught up.</p>
         </div>
         <div v-else class="empty-feed">
           <div class="empty-mark"><Sparkles :size="22" /></div>
@@ -82,10 +85,10 @@
           </div>
         </section>
 
-        <section class="rail-card clubs-card">
-          <div class="rail-heading"><h2>Read together</h2><BookOpen :size="17" /></div>
-          <p>Join a Book Club for shared reading lists and conversations that keep going.</p>
-          <RouterLink to="/clubs">Find your community <ArrowUpRight :size="15" /></RouterLink>
+        <section class="rail-card ranks-card">
+          <div class="rail-heading"><h2>Community ranks</h2><Trophy :size="17" /></div>
+          <p>Share useful ideas, join conversations, and see your contribution grow.</p>
+          <RouterLink to="/ranks">See the leaderboard <ArrowUpRight :size="15" /></RouterLink>
         </section>
         <footer class="rail-footer"><RouterLink to="/about">About</RouterLink><span>Follia · Discover anything.</span></footer>
       </aside>
@@ -94,9 +97,9 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowDown, ArrowUpRight, BookOpen, Compass, Plus, Sparkles } from 'lucide-vue-next'
+import { ArrowUpRight, Compass, Plus, Sparkles, Trophy } from 'lucide-vue-next'
 import MainLayout from '../layouts/MainLayout.vue'
 import FeedItemCard from '../components/FeedItemCard.vue'
 import UserAvatar from '../components/UserAvatar.vue'
@@ -113,18 +116,56 @@ const feed = ref([])
 const creators = ref([])
 const suggestionProfiles = ref([])
 const profile = ref(null)
+const page = ref(1)
+const hasMore = ref(true)
+const loadingMore = ref(false)
+const loadMoreError = ref('')
+const feedSentinel = ref(null)
 const loading = ref(true)
 const error = ref('')
+let feedRequestId = 0
+let feedObserver = null
 
 async function loadFeed() {
+  const requestId = ++feedRequestId
   loading.value = true
   error.value = ''
+  feed.value = []
+  page.value = 1
+  hasMore.value = true
+  loadMoreError.value = ''
   try {
-    feed.value = await getFeed(activeTab.value)
+    const result = await getFeed(activeTab.value, 1)
+    if (requestId !== feedRequestId) return
+    feed.value = result.results || []
+    hasMore.value = Boolean(result.has_more)
   } catch (err) {
-    error.value = err.message || 'The feed is temporarily unavailable.'
+    if (requestId === feedRequestId) error.value = err.message || 'The feed is temporarily unavailable.'
   } finally {
-    loading.value = false
+    if (requestId === feedRequestId) loading.value = false
+  }
+}
+
+async function loadMore() {
+  if (loading.value || loadingMore.value || !hasMore.value) return
+  loadingMore.value = true
+  loadMoreError.value = ''
+  const requestId = feedRequestId
+  const nextPage = page.value + 1
+  try {
+    const result = await getFeed(activeTab.value, nextPage)
+    if (requestId !== feedRequestId) return
+    const seen = new Set(feed.value.map((item) => item.kind + ':' + item.id))
+    for (const item of result.results || []) {
+      const key = item.kind + ':' + item.id
+      if (!seen.has(key)) { feed.value.push(item); seen.add(key) }
+    }
+    page.value = nextPage
+    hasMore.value = Boolean(result.has_more)
+  } catch (err) {
+    if (requestId === feedRequestId) loadMoreError.value = err.message || 'More posts could not be loaded.'
+  } finally {
+    if (requestId === feedRequestId) loadingMore.value = false
   }
 }
 
@@ -170,10 +211,18 @@ async function toggleSuggestedFollow(person) {
 }
 
 onMounted(async () => {
+  feedObserver = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting)) loadMore()
+  }, { rootMargin: '700px 0px' })
+  watch(feedSentinel, (element, previous) => {
+    if (previous) feedObserver?.unobserve(previous)
+    if (element) feedObserver?.observe(element)
+  }, { flush: 'post', immediate: true })
   await initializeAuth()
   try { profile.value = await getMyProfile() } catch {}
   await Promise.all([loadFeed(), loadCreators()])
 })
+onBeforeUnmount(() => feedObserver?.disconnect())
 </script>
 
 <style scoped>
@@ -206,7 +255,12 @@ onMounted(async () => {
 .suggestion-bio { min-height:30px; margin:0; color:var(--text-secondary); font-size:10px; line-height:1.5; }
 .suggestion-card > button { justify-self:start; min-height:29px; padding:0 11px; border-radius:999px; background:var(--text-main); color:var(--card-bg); font-size:10px; font-weight:700; }
 .suggestion-card > button.following { border:1px solid var(--border-color); background:transparent; color:var(--text-secondary); }
-.load-more { display:flex; align-items:center; justify-content:center; gap:8px; min-height:45px; border:1px solid var(--border-color); border-radius:14px; background:var(--card-bg); color:var(--text-secondary); font-size:12px; font-weight:650; }
+.feed-sentinel { height:1px; }
+.feed-more-loading,.feed-more-error { min-height:47px; display:flex; align-items:center; justify-content:center; gap:11px; color:var(--text-tertiary); font-size:12px; }
+.feed-more-loading i { width:18px; height:18px; border:2px solid var(--border-color); border-top-color:var(--accent); border-radius:50%; animation:feed-spin .7s linear infinite; }
+.feed-more-error button { min-height:34px; padding:0 12px; border-radius:10px; background:var(--hover-bg); color:var(--text-main); font-weight:700; }
+.feed-end { margin:7px 0; color:var(--text-tertiary); font-size:11px; text-align:center; }
+@keyframes feed-spin { to { transform:rotate(360deg); } }
 .empty-feed { display:flex; flex-direction:column; align-items:center; margin-top:12px; padding:50px 28px; border:1px dashed var(--border-color); border-radius:20px; background:var(--card-bg); text-align:center; }
 .empty-mark { width:48px; height:48px; display:grid; place-items:center; border-radius:15px; background:var(--icon-bg); color:var(--text-secondary); }
 .empty-feed h2 { margin:17px 0 0; font:750 19px Manrope,sans-serif; letter-spacing:-.03em; }
@@ -223,8 +277,8 @@ onMounted(async () => {
 .rail-mark { width:32px; height:32px; display:grid; place-items:center; margin-bottom:17px; border-radius:10px; background:var(--icon-bg); }
 .rail-kicker { margin-bottom:7px; font-size:9px; }
 .motto-card h2 { margin:0; font:800 22px Manrope,sans-serif; letter-spacing:-.045em; }
-.motto-card > p:not(.rail-kicker),.clubs-card > p { margin:7px 0 15px; color:var(--text-secondary); font-size:12px; line-height:1.55; }
-.rail-card > a,.clubs-card a { display:inline-flex; align-items:center; gap:6px; color:var(--text-main); font-size:11px; font-weight:700; }
+.motto-card > p:not(.rail-kicker),.ranks-card > p { margin:7px 0 15px; color:var(--text-secondary); font-size:12px; line-height:1.55; }
+.rail-card > a { display:inline-flex; align-items:center; gap:6px; color:var(--text-main); font-size:11px; font-weight:700; }
 .rail-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .rail-heading h2 { margin:0; font:750 14px Manrope,sans-serif; letter-spacing:-.02em; }
 .rail-heading > a { color:var(--text-tertiary); font-size:10px; font-weight:650; }

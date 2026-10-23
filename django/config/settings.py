@@ -33,6 +33,7 @@ ALLOWED_HOSTS = [
 # --------------------------------------------------
 
 INSTALLED_APPS = [
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -54,6 +55,8 @@ INSTALLED_APPS = [
     "library",
     "social",
     "clubs",
+    "ranking",
+    "messaging",
 ]
 
 
@@ -249,7 +252,6 @@ FRONTEND_URL = os.getenv(
 ) or "http://localhost:5173"
 FRONTEND_URL = FRONTEND_URL.rstrip("/")
 FOLLIA_PUBLIC_URL = (os.getenv("FOLLIA_PUBLIC_URL", "").strip() or FRONTEND_URL).rstrip("/")
-FFMPEG_BINARY = os.getenv("FFMPEG_BINARY", "ffmpeg").strip() or "ffmpeg"
 
 LOGIN_REDIRECT_URL = FRONTEND_URL + "/"
 
@@ -392,18 +394,46 @@ REST_FRAMEWORK = {
         "rest_framework.pagination.PageNumberPagination"
     ),
     "PAGE_SIZE": 30,
+    "DEFAULT_THROTTLE_RATES": {
+        "message_send": os.getenv("DM_SEND_RATE", "60/min"),
+        "message_report": os.getenv("DM_REPORT_RATE", "10/hour"),
+    },
 }
+
+# Ranking weights live in one place so the community rules can be tuned
+# without changing API handlers. Only server-created events use these values.
+RANKING_WEIGHTS = {
+    "post_published": int(os.getenv("RANK_POINTS_POST", "10")),
+    "media_published": int(os.getenv("RANK_POINTS_MEDIA", "2")),
+    "post_like_received": int(os.getenv("RANK_POINTS_LIKE", "2")),
+    "comment_written": int(os.getenv("RANK_POINTS_COMMENT", "1")),
+    "comment_received": int(os.getenv("RANK_POINTS_COMMENT_RECEIVED", "2")),
+    "resource_published": int(os.getenv("RANK_POINTS_RESOURCE", "8")),
+}
+RANKING_DAILY_COMMENT_LIMIT = int(os.getenv("RANK_DAILY_COMMENT_LIMIT", "10"))
+RANKING_DAILY_POST_LIMIT = int(os.getenv("RANK_DAILY_POST_LIMIT", "10"))
+RANKING_DAILY_RESOURCE_LIMIT = int(os.getenv("RANK_DAILY_RESOURCE_LIMIT", "5"))
+RANKING_DAILY_RECEIVED_LIKE_LIMIT = int(os.getenv("RANK_DAILY_RECEIVED_LIKE_LIMIT", "20"))
 
 
 # --------------------------------------------------
 # DJANGO CHANNELS
 # --------------------------------------------------
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [REDIS_URL]},
+        }
     }
-}
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        }
+    }
 
 
 # --------------------------------------------------

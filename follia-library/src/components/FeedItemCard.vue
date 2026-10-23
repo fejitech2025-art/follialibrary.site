@@ -266,6 +266,37 @@
         </form>
       </div>
     </Teleport>
+    <Teleport to="body">
+      <div v-if="shareOpen" class="report-overlay share-overlay" @click.self="shareOpen = false">
+        <section class="share-dialog" role="dialog" aria-modal="true" aria-labelledby="share-title">
+          <header><div><p>PASS IT ALONG</p><h2 id="share-title">Share in a message</h2></div><button type="button" aria-label="Close" @click="shareOpen = false"><X :size="18" /></button></header>
+          <div v-if="shareLoading" class="share-state"><LoaderCircle :size="20" class="spin" /> Finding your conversations…</div>
+          <template v-else>
+          <form class="share-search" @submit.prevent="findShareRecipients">
+            <input v-model="shareSearch" placeholder="Find a person" aria-label="Find a person to share with" />
+            <button type="submit" :disabled="shareSearching || !shareSearch.trim()">{{ shareSearching ? 'Searching…' : 'Find' }}</button>
+          </form>
+          <p v-if="shareError" class="share-error" role="alert">{{ shareError }}</p>
+          <div v-if="shareRecipientResults.length" class="share-list">
+            <button v-for="recipient in shareRecipientResults" :key="recipient.user_id || recipient.id" :disabled="!!sharingWith" @click="shareToRecipient(recipient)">
+              <span class="share-avatar"><UserAvatar :src="recipient.avatar_url || recipient.avatar" :alt="(recipient.display_name || recipient.username) + ' profile picture'" :icon-size="16" /></span>
+              <span><strong>{{ recipient.display_name || recipient.username }}</strong><small>@{{ recipient.username }}</small></span>
+              <LoaderCircle v-if="sharingWith === 'user-' + (recipient.user_id || recipient.id)" :size="16" class="spin" /><Send v-else :size="15" />
+            </button>
+          </div>
+          <p v-else-if="shareSearch.trim() && !shareSearching" class="share-error">No matching people found.</p>
+          <div v-if="!shareSearch.trim() && shareConversations.length" class="share-list">
+            <button v-for="conversation in shareConversations" :key="conversation.id" :disabled="sharingWith === conversation.id" @click="shareToConversation(conversation)">
+              <span class="share-avatar"><UserAvatar :src="conversation.participant.avatar_url" :alt="conversation.participant.display_name + ' profile picture'" :icon-size="16" /></span>
+              <span><strong>{{ conversation.participant.display_name || conversation.participant.username }}</strong><small>@{{ conversation.participant.username }}</small></span>
+              <LoaderCircle v-if="sharingWith === conversation.id" :size="16" class="spin" /><Send v-else :size="15" />
+            </button>
+          </div>
+          <div v-if="!shareSearch.trim() && !shareConversations.length" class="share-state"><p>Search for a person to start a conversation and share this post.</p><RouterLink to="/messages">Open messages <ArrowUpRight :size="14" /></RouterLink></div>
+          </template>
+        </section>
+      </div>
+    </Teleport>
   </article>
 </template>
 
@@ -314,6 +345,8 @@ import {
 import { toggleResourceLike } from '../services/resourceLikeService'
 import { toggleResourceCommentLike } from '../services/commentService'
 import { autoplayFeedVideo, handleFeedVideoPause, handleFeedVideoPlay, leaveFeedVideo } from '../utils/feedVideoPlayback'
+import { createClientId, getConversations, sendMessage, startConversation } from '../services/messageService'
+import { searchPublishers } from '../services/searchService'
 
 const props = defineProps({
   item: {
@@ -344,6 +377,14 @@ const commentText = ref('')
 const replyingTo = ref(null)
 const showMenu = ref(false)
 const showReport = ref(false)
+const shareOpen = ref(false)
+const shareConversations = ref([])
+const shareSearch = ref('')
+const shareRecipientResults = ref([])
+const shareSearching = ref(false)
+const shareLoading = ref(false)
+const shareError = ref('')
+const sharingWith = ref(null)
 const reportTarget = ref(null)
 const reportReason = ref('')
 const reportDescription = ref('')
@@ -770,6 +811,18 @@ function isCommentLikePending(comment) {
 }
 
 async function share() {
+  if (props.item.kind === 'post') {
+    await initializeAuth()
+    shareOpen.value = true
+    shareLoading.value = true
+    shareError.value = ''
+    shareSearch.value = ''
+    shareRecipientResults.value = []
+    try { shareConversations.value = (await getConversations()).filter((item) => !item.blocked) }
+    catch (error) { shareError.value = error.message || 'Your conversations could not be loaded.' }
+    finally { shareLoading.value = false }
+    return
+  }
   const url =
     window.location.origin +
     (props.item.kind === 'resource' ? '/resource/' : '/post/') +
@@ -794,6 +847,48 @@ async function share() {
       notify('Unable to share this item.')
     }
   }
+}
+
+async function shareToConversation(conversation) {
+  if (sharingWith.value) return
+  sharingWith.value = conversation.id
+  shareError.value = ''
+  try {
+    await sendMessage(conversation.id, { client_id:createClientId(), message_type:'post_share', post_id:props.item.id })
+    shareOpen.value = false
+    notify(`Shared with ${conversation.participant.display_name || conversation.participant.username}.`)
+  } catch (error) { shareError.value = error.message || 'This post could not be shared.' }
+  finally { sharingWith.value = null }
+}
+
+async function findShareRecipients() {
+  if (!shareSearch.value.trim() || shareSearching.value) return
+  shareSearching.value = true
+  shareError.value = ''
+  shareRecipientResults.value = []
+  try {
+    shareRecipientResults.value = (await searchPublishers(shareSearch.value)).filter((person) => Number(person.user_id || person.id) !== Number(user.value?.id || 0))
+  } catch (error) { shareError.value = error.message || 'People could not be searched.' }
+  finally { shareSearching.value = false }
+}
+
+async function shareToRecipient(person) {
+  const userId = Number(person.user_id || person.id)
+  const existing = shareConversations.value.find((item) => item.participant.id === userId)
+  if (existing) {
+    await shareToConversation(existing)
+    return
+  }
+  if (sharingWith.value) return
+  sharingWith.value = `user-${userId}`
+  shareError.value = ''
+  try {
+    const conversation = await startConversation(userId)
+    await sendMessage(conversation.id, { client_id:createClientId(), message_type:'post_share', post_id:props.item.id })
+    shareOpen.value = false
+    notify(`Shared with ${person.display_name || person.username}.`)
+  } catch (error) { shareError.value = error.message || 'This post could not be shared.' }
+  finally { sharingWith.value = null }
 }
 
 function openReport(type, comment = null) {
@@ -993,6 +1088,28 @@ async function saveEdit() {
 .report-submit { background:var(--primary-bg); color:var(--primary-text); }
 .report-submit:disabled { opacity:.5; }
 .report-error { margin:0; color:#a33b30; font-size:11px; }
+.share-dialog { width:min(460px,100%); max-height:min(620px,80vh); display:grid; grid-template-rows:auto minmax(0,1fr); overflow:hidden; border:1px solid var(--border-color); border-radius:20px; background:var(--card-bg); box-shadow:0 24px 80px rgba(0,0,0,.25); }
+.share-dialog header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 20px; border-bottom:1px solid var(--border-soft); }
+.share-dialog header p { margin:0 0 4px; color:var(--text-tertiary); font-size:9px; font-weight:800; letter-spacing:.13em; }
+.share-dialog h2 { margin:0; font:750 19px Manrope,sans-serif; }
+.share-dialog header > button { width:34px; height:34px; display:grid; place-items:center; border-radius:10px; background:var(--icon-bg); color:var(--text-main); }
+.share-state { min-height:150px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:18px; color:var(--text-secondary); font-size:11px; text-align:center; }
+.share-state p { margin:0; }
+.share-state a { display:inline-flex; align-items:center; gap:5px; color:var(--text-main); font-weight:750; }
+.share-search { display:flex; gap:8px; padding:12px 12px 5px; }
+.share-search input { min-width:0; flex:1; height:40px; padding:0 11px; border:1px solid var(--border-color); border-radius:11px; background:var(--card-soft); color:var(--text-main); font:inherit; font-size:11px; }
+.share-search button { min-width:62px; padding:0 12px; border-radius:10px; background:var(--primary-bg); color:var(--primary-text); font-size:11px; font-weight:750; }
+.share-search button:disabled { opacity:.5; }
+.share-error { margin:14px; color:#a33b30; font-size:11px; }
+.share-list { min-height:0; overflow:auto; padding:8px; }
+.share-list > button { width:100%; min-height:57px; display:flex; align-items:center; gap:10px; padding:8px; border-radius:12px; background:transparent; color:var(--text-secondary); text-align:left; }
+.share-list > button:hover { background:var(--card-soft); }
+.share-list > button:disabled { opacity:.55; }
+.share-avatar { width:38px; height:38px; flex:0 0 38px; display:grid; place-items:center; overflow:hidden; border-radius:50%; background:var(--icon-bg); }
+.share-avatar img { width:100%; height:100%; object-fit:cover; }
+.share-list > button > span:nth-child(2) { min-width:0; flex:1; display:grid; gap:3px; }
+.share-list strong,.share-list small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.share-list strong { color:var(--text-main); font-size:11px; }.share-list small { color:var(--text-tertiary); font-size:9px; }
 @media(max-width:480px) {
   .feed-card { padding:15px 14px 11px; border-radius:17px; }
   .avatar { width:38px; height:38px; flex-basis:38px; }

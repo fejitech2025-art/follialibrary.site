@@ -102,25 +102,18 @@ class ResourceCommentReplyApiTests(TestCase):
         self.assertEqual(Notification.objects.filter(recipient=self.author, type="comment_like").count(), 1)
 
 
-class ResourcePreviewAndWatermarkTests(TestCase):
+class ResourcePreviewAndOriginalDownloadTests(TestCase):
     def setUp(self):
         self.media_root = tempfile.TemporaryDirectory()
         self.addCleanup(self.media_root.cleanup)
-        self.media_settings = override_settings(MEDIA_ROOT=self.media_root.name, FOLLIA_PUBLIC_URL="https://library.example")
+        self.media_settings = override_settings(MEDIA_ROOT=self.media_root.name)
         self.media_settings.enable()
         self.addCleanup(self.media_settings.disable)
         self.author = User.objects.create_user(username="file-owner")
         Profile.objects.update_or_create(user=self.author, defaults={"username": self.author.username})
         self.client = APIClient()
 
-    def test_production_watermark_rejects_a_localhost_site_url(self):
-        from config.watermark import WatermarkProcessingError, watermarked_download
-
-        with override_settings(DEBUG=False, FOLLIA_PUBLIC_URL="http://localhost:5173", FRONTEND_URL="http://localhost:5173"):
-            with self.assertRaisesRegex(WatermarkProcessingError, "public Follia Library site"):
-                watermarked_download(None, "cover.png", "file-owner")
-
-    def test_pdf_preview_serves_original_inline_and_download_contains_watermark(self):
+    def test_pdf_preview_and_download_preserve_the_original(self):
         try:
             import pymupdf as fitz
         except ImportError:
@@ -156,7 +149,7 @@ class ResourcePreviewAndWatermarkTests(TestCase):
         downloaded_bytes = b"".join(download.streaming_content)
         download.close()
         downloaded_doc = fitz.open(stream=downloaded_bytes, filetype="pdf")
-        self.assertTrue(downloaded_doc[0].get_images(full=True))
+        self.assertEqual(downloaded_doc[0].get_images(full=True), [])
         downloaded_doc.close()
 
         with resource.file.open("rb") as stored:
@@ -164,7 +157,7 @@ class ResourcePreviewAndWatermarkTests(TestCase):
         self.assertEqual(untouched[0].get_images(full=True), [])
         untouched.close()
 
-    def test_image_download_contains_a_visible_watermark(self):
+    def test_image_download_preserves_original_pixels(self):
         try:
             from PIL import Image, ImageChops
         except ImportError:
@@ -188,4 +181,4 @@ class ResourcePreviewAndWatermarkTests(TestCase):
         output = Image.open(BytesIO(b"".join(response.streaming_content))).convert("RGB")
         response.close()
         original_image = Image.new("RGB", (900, 600), (70, 120, 160))
-        self.assertIsNotNone(ImageChops.difference(original_image, output).getbbox())
+        self.assertIsNone(ImageChops.difference(original_image, output).getbbox())

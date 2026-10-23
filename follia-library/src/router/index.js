@@ -11,11 +11,11 @@ import EditProfileView from '../views/EditProfileView.vue'
 import LoginView from '../views/LoginView.vue'
 import ResourceDetailView from '../views/ResourceDetailView.vue'
 import PublisherDetailView from '../views/PublisherDetailView.vue'
-import BookClubView from '../views/BookClubView.vue'
-import BookClubsView from '../views/BookClubsView.vue'
 import CreateView from '../views/CreateView.vue'
 import PostDetailView from '../views/PostDetailView.vue'
 import AboutView from '../views/AboutView.vue'
+import RanksView from '../views/RanksView.vue'
+import MessagesView from '../views/MessagesView.vue'
 
 import { useAuth } from '../composables/useAuth'
 
@@ -39,12 +39,8 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
 
-    {
-      path: '/clubs',
-      name: 'clubs',
-      component: BookClubsView,
-      meta: { requiresAuth: true },
-    },
+    { path: '/ranks', name: 'ranks', component: RanksView, meta: { requiresAuth: true } },
+    { path: '/messages', name: 'messages', component: MessagesView, meta: { requiresAuth: true } },
 
     {
       path: '/about',
@@ -148,16 +144,6 @@ const router = createRouter({
       alias: '/publisher/:id',
       name: 'publisher-detail',
       component: PublisherDetailView,
-      props: true,
-      meta: {
-        requiresAuth: true,
-      },
-    },
-
-    {
-      path: '/book-club/:id',
-      name: 'book-club',
-      component: BookClubView,
       props: true,
       meta: {
         requiresAuth: true,

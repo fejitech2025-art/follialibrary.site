@@ -4,9 +4,10 @@ from django.contrib import admin
 from django.urls import include, path
 
 from accounts import views as account_views
-from clubs import views as club_views
 from library import views as library_views
 from social import views as social_views
+from ranking import views as ranking_views
+from messaging import views as messaging_views
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -52,16 +53,15 @@ urlpatterns = [
     path("api/notifications/read-all/", account_views.notification_read_all, name="notification-read-all"),
     path("api/push/public-key/", account_views.push_public_key, name="push-public-key"),
     path("api/push/subscriptions/", account_views.push_subscriptions, name="push-subscriptions"),
-    path("api/clubs/", club_views.clubs, name="clubs"),
-    path("api/clubs/<int:club_id>/", club_views.club_detail, name="club-detail"),
-    path("api/clubs/<int:club_id>/membership/", club_views.club_membership, name="club-membership"),
-    path("api/clubs/<int:club_id>/join/", club_views.join_club, name="join-club"),
-    path("api/clubs/<int:club_id>/members/<int:member_id>/", club_views.manage_member, name="manage-member"),
-    path("api/clubs/<int:club_id>/messages/", club_views.messages, name="club-messages"),
-    path("api/clubs/<int:club_id>/messages/<int:message_id>/", club_views.message_detail, name="club-message-detail"),
-    path("api/clubs/<int:club_id>/messages/<int:message_id>/pin/", club_views.pin_message, name="pin-message"),
-    path("api/clubs/<int:club_id>/resources/", club_views.club_resources, name="club-resources"),
-    path("api/clubs/<int:club_id>/resources/<int:resource_id>/", club_views.club_resource_detail, name="club-resource-detail"),
+    path("api/ranks/", ranking_views.ranks, name="ranks"),
+    path("api/messages/conversations/", messaging_views.conversations, name="dm-conversations"),
+    path("api/messages/conversations/<int:conversation_id>/", messaging_views.conversation_detail, name="dm-conversation-detail"),
+    path("api/messages/conversations/<int:conversation_id>/messages/", messaging_views.conversation_messages, name="dm-messages"),
+    path("api/messages/conversations/<int:conversation_id>/read/", messaging_views.mark_read, name="dm-read"),
+    path("api/messages/<int:message_id>/media/", messaging_views.message_media, name="dm-media"),
+    path("api/messages/blocks/", messaging_views.blocks, name="dm-blocks"),
+    path("api/messages/blocks/<int:user_id>/", messaging_views.unblock, name="dm-unblock"),
+    path("api/messages/<int:message_id>/report/", messaging_views.report_message, name="dm-report"),
 ]
 
 if settings.DEBUG:

@@ -127,10 +127,6 @@ function decodeVapidKey(value) {
   return Uint8Array.from(raw, (character) => character.charCodeAt(0))
 }
 
-export async function createBookClubNotification() {
-  return null
-}
-
 export async function subscribeToMyNotifications(callback) {
   let previous = new Map()
   let stopped = false
@@ -167,9 +163,7 @@ export function getNotificationMessage(notification) {
     case 'comment': return actor + ' commented on your content.'
     case 'comment_reply': return actor + ' replied to your comment.'
     case 'comment_like': return actor + ' liked your comment on ' + (notification?.resource_id ? 'a resource.' : 'a post.')
-    case 'book_club_join': return actor + ' joined your Book Club.'
-    case 'book_club_reply': return actor + ' replied to your message.'
-    case 'book_club_admin': return actor + ' updated your Book Club role.'
+    case 'message': return actor + ' sent you a message.'
     default: return 'You have a new notification.'
   }
 }
@@ -180,6 +174,6 @@ export function getNotificationTypeLabel(type) {
   if (type === 'comment') return 'Comment'
   if (type === 'comment_reply') return 'Reply'
   if (type === 'comment_like') return 'Comment like'
-  if (type?.startsWith('book_club')) return 'Book Club'
+  if (type === 'message') return 'Message'
   return 'Notification'
 }

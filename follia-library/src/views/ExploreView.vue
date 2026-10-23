@@ -15,7 +15,7 @@
         <input
           v-model="query"
           type="search"
-          placeholder="Search people, posts, books, clubs…"
+          placeholder="Search people, posts, and resources…"
           aria-label="Search all of Follia"
         />
         <button
@@ -150,51 +150,6 @@
           </div>
         </section>
 
-        <!-- Book Clubs -->
-        <section
-          v-if="showClubs && results.clubs.length"
-          class="result-section"
-        >
-          <div class="section-title">
-            <div>
-              <small>READ TOGETHER</small>
-              <h2>Book Clubs</h2>
-            </div>
-            <span>{{ results.clubs.length }}</span>
-          </div>
-
-          <div class="clubs-grid">
-            <RouterLink
-              v-for="club in results.clubs"
-              :key="club.id"
-              :to="{ name: 'book-club', params: { id: club.id } }"
-              class="club-card"
-            >
-              <div class="club-avatar">
-                <img
-                  v-if="clubAvatarUrl(club) && !hasFailedImage(`club-${club.id}`)"
-                  :src="clubAvatarUrl(club)"
-                  alt=""
-                  @error="handleImageError(`club-${club.id}`)"
-                />
-                <UsersRound v-else :size="22" />
-              </div>
-
-              <span>
-                <strong>{{ club.name }}</strong>
-                <small>
-                  {{ club.member_count || club.members?.length || 0 }} members
-                </small>
-              </span>
-
-              <ArrowUpRight :size="17" />
-
-              <p>
-                {{ club.description || 'A place to read, discuss and share recommendations.' }}
-              </p>
-            </RouterLink>
-          </div>
-        </section>
       </div>
     </section>
   </MainLayout>
@@ -209,7 +164,6 @@ import {
   ArrowUpRight,
   Compass,
   Search,
-  UsersRound,
   X,
 } from 'lucide-vue-next'
 
@@ -219,7 +173,6 @@ import FeedItemCard from '../components/FeedItemCard.vue'
 
 import { getFeed } from '../services/postService'
 import { getPublishers } from '../services/publisherService'
-import { getBookClubs } from '../services/bookClubService'
 import { searchLibrary } from '../services/searchService'
 
 const route = useRoute()
@@ -253,13 +206,6 @@ function personAvatarUrl(person) {
   )
 }
 
-function clubAvatarUrl(club) {
-  return resolveMediaUrl(
-    club?.avatar_url ||
-    club?.avatar,
-  )
-}
-
 /*
 |--------------------------------------------------------------------------
 | Discovery state
@@ -275,7 +221,6 @@ const results = ref({
   users: [],
   posts: [],
   resources: [],
-  clubs: [],
 })
 
 const tabs = [
@@ -283,7 +228,6 @@ const tabs = [
   { key: 'people', label: 'People' },
   { key: 'posts', label: 'Posts' },
   { key: 'resources', label: 'Resources' },
-  { key: 'clubs', label: 'Book Clubs' },
 ]
 
 const showUsers = computed(
@@ -296,10 +240,6 @@ const showPosts = computed(
 
 const showResources = computed(
   () => activeTab.value === 'all' || activeTab.value === 'resources',
-)
-
-const showClubs = computed(
-  () => activeTab.value === 'all' || activeTab.value === 'clubs',
 )
 
 const totalResults = computed(() =>
@@ -318,7 +258,6 @@ const resultCount = (key) => {
     people: 'users',
     posts: 'posts',
     resources: 'resources',
-    clubs: 'clubs',
   }[key]
 
   return resultKey ? results.value[resultKey].length : 0
@@ -337,17 +276,16 @@ async function loadDiscovery() {
   error.value = ''
 
   try {
-    const [feed, users, clubs] = await Promise.all([
+    const [feedResponse, users] = await Promise.all([
       getFeed('for-you'),
       getPublishers(),
-      getBookClubs(),
     ])
+    const feed = feedResponse.results || []
 
     results.value = {
       users: users.slice(0, 8),
       posts: feed.filter((item) => item.kind === 'post').slice(0, 8),
       resources: feed.filter((item) => item.kind === 'resource').slice(0, 8),
-      clubs: clubs.slice(0, 8),
     }
   } catch (err) {
     error.value = err.message || 'Unable to load discovery right now.'
@@ -378,7 +316,6 @@ async function runSearch() {
       users: searchResults.users || [],
       posts: searchResults.posts || [],
       resources: searchResults.resources || [],
-      clubs: searchResults.clubs || [],
     }
   } catch (err) {
     error.value = err.message || 'Unable to search Follia right now.'
@@ -459,16 +396,6 @@ onMounted(() => {
 .person-card p { display:-webkit-box; min-height:32px; margin:9px 0 8px; color:var(--text-secondary); font-size:10px; line-height:1.5; overflow:hidden; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 .person-stats { color:var(--text-tertiary); font-size:10px; }
 .feed-results { display:grid; gap:12px; max-width:700px; }
-.clubs-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:11px; }
-.club-card { display:grid; grid-template-columns:42px 1fr 18px; align-items:center; gap:11px; padding:14px; border:1px solid var(--border-color); border-radius:16px; background:var(--card-bg); }
-.club-avatar { width:42px; height:42px; display:grid; place-items:center; overflow:hidden; border-radius:13px; background:var(--icon-bg); color:var(--text-secondary); }
-.club-avatar img { width:100%; height:100%; object-fit:cover; }
-.club-card > span { min-width:0; }
-.club-card strong,.club-card small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.club-card strong { font-size:12px; }
-.club-card small { margin-top:3px; color:var(--text-tertiary); font-size:10px; }
-.club-card > svg { color:var(--text-tertiary); }
-.club-card p { grid-column:1/-1; margin:0; color:var(--text-secondary); font-size:11px; line-height:1.5; }
 
 /* Original loading skeleton and shimmer animation preserved. */
 .explore-loading { display:grid; gap:12px; }
@@ -481,6 +408,6 @@ onMounted(() => {
 .explore-empty p { max-width:390px; margin:8px 0 18px; color:var(--text-secondary); font-size:12px; line-height:1.6; }
 .explore-empty button { padding:10px 13px; border-radius:10px; background:var(--primary-bg); color:var(--primary-text); font-size:11px; font-weight:700; }
 @media(max-width:760px) { .people-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media(max-width:520px) { .explore-heading { align-items:flex-start; } .explore-heading h1 { font-size:37px; } .explore-symbol { width:46px; height:46px; flex-basis:46px; } .discovery-search { height:52px; } .clubs-grid { grid-template-columns:1fr; } .section-title h2 { font-size:20px; } }
+@media(max-width:520px) { .explore-heading { align-items:flex-start; } .explore-heading h1 { font-size:37px; } .explore-symbol { width:46px; height:46px; flex-basis:46px; } .discovery-search { height:52px; } .section-title h2 { font-size:20px; } }
 @media(max-width:360px) { .explore-heading h1 { font-size:32px; } .person-card { padding:12px; } }
 </style>

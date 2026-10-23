@@ -20,7 +20,7 @@
             <div class="profile-stats">
               <button @click="activeTab = 'Followers'"><UsersRound :size="15" /><strong>{{ profile.follower_count || 0 }}</strong><span>Followers</span></button>
               <button @click="activeTab = 'Following'"><UserRound :size="15" /><strong>{{ profile.following_count || 0 }}</strong><span>Following</span></button>
-              <span class="profile-stat"><Heart :size="15" /><strong>{{ profile.like_count || 0 }}</strong><span>Likes</span></span>
+              <span class="profile-stat rank-stat"><Trophy :size="15" /><strong>{{ profile.rank_position ? `#${profile.rank_position}` : '—' }}</strong><span>Rank</span></span>
             </div>
           </div>
           <div class="profile-actions">
@@ -32,6 +32,7 @@
                 <UserPlus v-else :size="16" />
                 {{ following ? 'Following' : 'Follow' }}
               </button>
+              <RouterLink class="message-button" :to="{ name: 'messages', query: { user: profile.user_id || profile.id } }"><MessageCircle :size="16" /><span>Message</span></RouterLink>
               <button class="report-button" aria-label="Report profile" @click="openReport"><Flag :size="16" /><span>Report</span></button>
             </template>
           </div>
@@ -91,7 +92,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, ArrowUpRight, BookOpen, Flag, Heart, LoaderCircle, MessageCircle, Pencil, UserCheck, UserPlus, UserRound, UsersRound, X } from 'lucide-vue-next'
+import { ArrowLeft, ArrowUpRight, BookOpen, Flag, LoaderCircle, MessageCircle, Pencil, Trophy, UserCheck, UserPlus, UserRound, UsersRound, X } from 'lucide-vue-next'
 import MainLayout from '../layouts/MainLayout.vue'
 import FeedItemCard from '../components/FeedItemCard.vue'
 import ResourceCard from '../components/ResourceCard.vue'
@@ -227,7 +228,7 @@ onMounted(loadProfile)
 .profile-stats strong { font-size:13px; font-weight:750; }
 .profile-stats span { color:var(--text-secondary); font-size:11px; }
 .profile-actions { display:flex; align-items:center; gap:8px; }
-.follow-button,.edit-button { min-height:40px; display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:0 13px; border:1px solid var(--border-color); border-radius:12px; background:var(--primary-bg); color:var(--primary-text); font-size:11px; font-weight:700; }
+.follow-button,.message-button,.edit-button { min-height:40px; display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:0 13px; border:1px solid var(--border-color); border-radius:12px; background:var(--primary-bg); color:var(--primary-text); font-size:11px; font-weight:700; }
 .follow-button.following { background:transparent; color:var(--text-main); }
 .report-button { min-height:40px; display:inline-flex; align-items:center; gap:7px; padding:0 11px; border:1px solid var(--border-color); border-radius:12px; background:transparent; color:var(--text-secondary); font-size:11px; }
 .profile-tabs { display:flex; gap:23px; margin:20px 0 17px; border-bottom:1px solid var(--border-color); overflow:auto; }
@@ -266,12 +267,13 @@ onMounted(loadProfile)
 .spin { animation:spin 1s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
 @media(max-width:740px) {
-  .profile-hero { grid-template-columns:72px minmax(0,1fr); gap:14px; padding:17px; }
-  .profile-avatar { width:72px; height:72px; font-size:20px; }
+  .profile-hero { grid-template-columns:minmax(0,1fr); justify-items:center; gap:15px; padding:22px 17px; text-align:center; }
+  .profile-avatar { width:88px; height:88px; font-size:22px; border-radius:50%; }
+  .profile-identity { width:100%; }
   .profile-identity h1 { font-size:clamp(21px,6vw,28px); overflow-wrap:anywhere; }
   .profile-identity .bio { margin-top:10px; font-size:12px; }
-  .profile-actions { grid-column:1/-1; }
-  .profile-stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:15px; }
+  .profile-actions { grid-column:auto; justify-content:center; flex-wrap:wrap; }
+  .profile-stats { justify-content:center; gap:17px; margin-top:15px; }
   .profile-stats button,.profile-stat { min-width:0; flex-wrap:wrap; gap:5px; }
   .profile-stats span { font-size:10px; }
   .website { max-width:100%; overflow-wrap:anywhere; }
@@ -279,8 +281,8 @@ onMounted(loadProfile)
   .profile-tabs { gap:19px; }
 }
 @media(max-width:400px) {
-  .profile-hero { grid-template-columns:58px minmax(0,1fr); gap:12px; padding:14px; }
-  .profile-avatar { width:58px; height:58px; font-size:17px; }
+  .profile-hero { grid-template-columns:minmax(0,1fr); gap:12px; padding:16px 12px; }
+  .profile-avatar { width:76px; height:76px; font-size:19px; }
   .profile-actions { gap:7px; }
   .profile-actions > * { flex:1; }
   .report-button { justify-content:center; }

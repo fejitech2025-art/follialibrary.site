@@ -1,9 +1,9 @@
 from rest_framework import serializers
-from django.db.models import Count
 
 from config.serializer_fields import SafeStorageFileField
 from config.storage_backends import storage_file_url
 from .models import Follow, Notification, Profile
+from ranking.service import rank_map
 
 
 class ProfileSerializer(serializers.ModelSerializer):
@@ -13,15 +13,16 @@ class ProfileSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
     follower_count = serializers.SerializerMethodField()
     following_count = serializers.SerializerMethodField()
-    like_count = serializers.SerializerMethodField()
+    rank_position = serializers.SerializerMethodField()
+    rank_score = serializers.SerializerMethodField()
     resource_count = serializers.SerializerMethodField()
     post_count = serializers.SerializerMethodField()
     is_following = serializers.SerializerMethodField()
 
     class Meta:
         model = Profile
-        fields = ["id", "user_id", "username", "display_name", "avatar_url", "avatar", "bio", "location", "website", "follower_count", "following_count", "like_count", "resource_count", "post_count", "is_following"]
-        read_only_fields = ["id", "follower_count", "following_count", "like_count", "resource_count", "post_count", "is_following"]
+        fields = ["id", "user_id", "username", "display_name", "avatar_url", "avatar", "bio", "location", "website", "follower_count", "following_count", "rank_position", "rank_score", "resource_count", "post_count", "is_following"]
+        read_only_fields = ["id", "follower_count", "following_count", "rank_position", "rank_score", "resource_count", "post_count", "is_following"]
 
     def get_avatar_url(self, obj):
         return storage_file_url(obj.avatar, self.context.get("request"))
@@ -32,10 +33,18 @@ class ProfileSerializer(serializers.ModelSerializer):
     def get_following_count(self, obj):
         return obj.user.following_edges.count()
 
-    def get_like_count(self, obj):
-        posts = obj.user.posts.aggregate(total=Count("likes"))["total"] or 0
-        resources = obj.user.resources.aggregate(total=Count("likes"))["total"] or 0
-        return posts + resources
+    def _rank(self, obj):
+        cached = self.context.get("_rank_map")
+        if cached is None:
+            cached = rank_map("overall")
+            self.context["_rank_map"] = cached
+        return cached.get(obj.user_id, {"rank": None, "score": 0})
+
+    def get_rank_position(self, obj):
+        return self._rank(obj)["rank"]
+
+    def get_rank_score(self, obj):
+        return self._rank(obj)["score"]
 
     def get_resource_count(self, obj):
         return obj.user.resources.filter(status="published").count()
@@ -55,7 +64,7 @@ class NotificationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Notification
-        fields = ["id", "actor", "actor_id", "type", "post_id", "resource_id", "comment_id", "book_club_id", "read", "created_at"]
+        fields = ["id", "actor", "actor_id", "type", "post_id", "resource_id", "comment_id", "read", "created_at"]
 
     def get_actor(self, obj):
         return ProfileSerializer(obj.actor.profile, context=self.context).data

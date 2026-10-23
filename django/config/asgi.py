@@ -12,14 +12,13 @@ from django.urls import path
 # Initialize Django before importing application models.
 django_asgi_app = get_asgi_application()
 
-from clubs.consumers import ClubChatConsumer
+from messaging.consumers import DirectMessageConsumer
+from ranking.consumers import RankingConsumer
 
 
 websocket_routes = [
-    path(
-        "ws/clubs/<int:club_id>/",
-        ClubChatConsumer.as_asgi(),
-    ),
+    path("ws/messages/", DirectMessageConsumer.as_asgi()),
+    path("ws/ranks/", RankingConsumer.as_asgi()),
 ]
 
 allowed_websocket_origins = {
